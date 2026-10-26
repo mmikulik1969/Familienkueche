@@ -387,7 +387,8 @@ function gate(html){
 const gateErr=m=>`<div class="err" role="alert">${esc(m)}</div>`;
 function loginGate(err){
   gate(`<div class="card"><h2>Willkommen</h2><p class="muted">Melde dich mit deinem privaten Microsoft-Konto an. Rezepte, Vorrat und Fotos liegen danach im OneDrive der Familie.</p>
-  <button class="btn" data-act="login">Mit Microsoft anmelden</button>${err?gateErr(err):''}</div>`);
+  <button class="btn" data-act="login">Mit Microsoft anmelden</button>${err?gateErr(err):''}</div>
+  <div class="acts"><button class="btn quiet sm" data-act="reset">Klappt nicht? Anmeldung zurücksetzen</button></div>`);
 }
 function setupGate(err){
   const a=Cloud.account();
@@ -411,6 +412,9 @@ function run(){
 }
 async function start(){
   $('#today').textContent=fmtDay(NOW);
+  if(!/[#&]code=/.test(location.hash)){ // liegengebliebener Anmeldevorgang von einem Abbruch
+    for(const st of [localStorage,sessionStorage]){try{Object.keys(st).filter(k=>/interaction\.status/.test(k)).forEach(k=>st.removeItem(k))}catch(e){}}
+  }
   try{await Cloud.init()}catch(e){loginGate('Die Anmeldung konnte nicht gestartet werden: '+(e.message||e.errorCode||e));return}
   if(!Cloud.account())return loginGate();
   if(!Cloud.loc())return setupGate();
@@ -424,6 +428,9 @@ document.addEventListener('click',async e=>{
   switch(a){
     case 'login':t.disabled=true;Cloud.login().catch(x=>{t.disabled=false;loginGate(x.message||String(x))});break;
     case 'logout':Cloud.logout();break;
+    case 'reset':{try{localStorage.clear();sessionStorage.clear()}catch(x){}
+      try{for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister();for(const k of await caches.keys())await caches.delete(k)}catch(x){}
+      location.replace(location.pathname);break}
     case 'createNew':{t.disabled=true;t.textContent='Legt an …';
       try{await Cloud.createFolder();S=emptyState();Sync.base=null;Sync.etag=null;cacheSave();run()}catch(x){setupGate(errText(x))}break}
     case 'joinLink':{const u=$('#glink').value.trim();if(!u){toast('Bitte den Link einfügen.');break}
