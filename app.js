@@ -119,7 +119,7 @@ async function doPull(){
   try{
     const m=await Cloud.meta();
     if(!m){if(!Sync.etag||isDirty())await doPush();return}
-    if(m.eTag!==Sync.etag){const rd=await Cloud.readData();if(rd)applyRemote(rd)}
+    if(m.eTag!==Sync.etag){const rd=await Cloud.readData();if(rd&&rd.data)applyRemote(rd);else if(isDirty())await doPush()}
     setSync(isDirty()?'Änderungen offen':'Synchron',!isDirty());
   }catch(e){onError(e)}
 }
@@ -129,7 +129,7 @@ async function doPush(){
   try{
     if(!Sync.base){ // noch nie abgeglichen: vorhandene Daten zuerst laden, nie blind überschreiben
       const m=await Cloud.meta();
-      if(m){const rd=await Cloud.readData();if(rd)applyRemote(rd);if(!isDirty())return}
+      if(m){const rd=await Cloud.readData();if(rd&&rd.data)applyRemote(rd);if(!isDirty())return}
     }
     for(let i=0;i<3;i++){
       const json=JSON.stringify(S);

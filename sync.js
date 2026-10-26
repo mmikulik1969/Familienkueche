@@ -49,10 +49,12 @@ const Cloud=(()=>{
     return r.status===204?null:r.json();
   }
   const JSONH={'Content-Type':'application/json'};
-  const setLoc=l=>{loc=l;try{localStorage.setItem(LOC_KEY,JSON.stringify(l))}catch(e){}};
   const fixId=d=>/^[0-9a-f]{16}$/i.test(d)?d.toUpperCase():d; // private OneDrive-IDs sind großgeschrieben gültig
-  const base=()=>loc.own?`/me/drive/items/${loc.folderId}`:`/drives/${fixId(loc.driveId)}/items/${loc.folderId}`;
-  const file=n=>`${base()}:/${encodeURIComponent(n)}`;
+  const drv=()=>loc.own?'/me/drive':`/drives/${fixId(loc.driveId)}`;
+  const item=id=>`${drv()}/items/${id}`;
+  const base=()=>item(loc.folderId);
+  let files=new Map(); // Dateiname -> {id,name,eTag} im Ordner
+  const setLoc=l=>{loc=l;files=new Map();try{localStorage.setItem(LOC_KEY,JSON.stringify(l))}catch(e){}};
 
   /* Ordner anlegen (erste Person) oder per Link beitreten (alle anderen) */
   async function createFolder(){
@@ -74,44 +76,73 @@ const Cloud=(()=>{
     return loc;
   }
 
+  /* Dateien im Ordner: immer über die Datei-ID ansprechen, nie über Ordner-ID plus Pfad */
+  async function list(){
+    let url=`${base()}/children?$select=id,name,eTag&$top=200`; const m=new Map();
+    while(url){const j=await jx(url);for(const it of j.value)m.set(it.name,it);url=j['@odata.nextLink']||null}
+    files=m; return m;
+  }
+  async function find(name,fresh){
+    if(!fresh&&files.has(name))return files.get(name);
+    await list(); return files.get(name)||null;
+  }
+  async function ensure(name){
+    let it=await find(name); if(it)return it;
+    try{it=await jx(base()+'/children',{method:'POST',headers:JSONH,body:JSON.stringify({name,file:{},'@microsoft.graph.conflictBehavior':'fail'})})}
+    catch(e){if(e.status!==409)throw e;it=await find(name,true)}
+    files.set(name,it); return it;
+  }
+
   /* daten.json */
   async function meta(){
-    const r=await gx(file('daten.json'));
-    if(r.status===404)return null;
-    if(!r.ok)throw await fail(r);
-    return r.json();
+    const it=files.get('daten.json');
+    if(it){
+      const r=await gx(item(it.id)+'?$select=id,eTag');
+      if(r.ok){const j=await r.json();files.set('daten.json',{...it,eTag:j.eTag});return j}
+      if(r.status!==404)throw await fail(r);
+      files.delete('daten.json');
+    }
+    return find('daten.json',true);
   }
   async function readData(){
     const m=await meta(); if(!m)return null;
-    const dl=m['@microsoft.graph.downloadUrl'];
-    let r;
-    try{r=dl?await fetch(dl):null}catch(e){r=null}
-    if(!r||!r.ok)r=await gx(file('daten.json')+':/content');
+    const j=await jx(item(m.id));
+    let r=null;
+    try{if(j['@microsoft.graph.downloadUrl'])r=await fetch(j['@microsoft.graph.downloadUrl'])}catch(e){}
+    if(!r||!r.ok)r=await gx(item(m.id)+'/content');
     if(!r.ok)throw await fail(r);
-    return {etag:m.eTag,data:JSON.parse(await r.text())};
+    const txt=await r.text();
+    return {etag:j.eTag,data:txt.trim()?JSON.parse(txt):null};
   }
   async function writeData(json,etag){
+    const it=await ensure('daten.json');
     const h={'Content-Type':'application/json'}; if(etag)h['If-Match']=etag;
-    const r=await gx(file('daten.json')+':/content',{method:'PUT',headers:h,body:json});
+    const r=await gx(item(it.id)+'/content',{method:'PUT',headers:h,body:json});
     if(r.status===412){const x=new Error('conflict');x.status=412;throw x}
     if(!r.ok)throw await fail(r);
-    return (await r.json()).eTag;
+    const j=await r.json(); files.set('daten.json',{id:it.id,name:'daten.json',eTag:j.eTag});
+    return j.eTag;
   }
 
   /* Fotos */
   const photos=new Map();
   async function putFile(name,blob){
-    const r=await gx(file(name)+':/content',{method:'PUT',headers:{'Content-Type':blob.type||'image/jpeg'},body:blob});
+    const it=await ensure(name);
+    const r=await gx(item(it.id)+'/content',{method:'PUT',headers:{'Content-Type':blob.type||'image/jpeg'},body:blob});
     if(!r.ok)throw await fail(r);
     photos.set(name,URL.createObjectURL(blob));
   }
   async function photoUrl(name){
     if(photos.has(name))return photos.get(name);
-    const r=await gx(file(name)+':/content');
+    const it=await find(name); if(!it)throw new Error('Foto nicht gefunden');
+    const r=await gx(item(it.id)+'/content');
     if(!r.ok)throw await fail(r);
     const u=URL.createObjectURL(await r.blob()); photos.set(name,u); return u;
   }
-  const delFile=async name=>{photos.delete(name);try{await gx(file(name),{method:'DELETE'})}catch(e){}};
+  const delFile=async name=>{
+    photos.delete(name);
+    try{const it=await find(name);if(it){await gx(item(it.id),{method:'DELETE'});files.delete(name)}}catch(e){}
+  };
 
   return {redirectUri,init,login,logout,account:()=>account,loc:()=>loc,createFolder,createLink,join,meta,readData,writeData,putFile,photoUrl,delFile};
 })();
