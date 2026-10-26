@@ -1,4 +1,5 @@
 'use strict';
+const APP_VERSION='2026-10-26 d';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -347,7 +348,8 @@ function settingsSheet(link){
   <h3 style="margin-top:20px">Rezepte übernehmen</h3>
   <p class="small muted">Aus dem Prototyp: dort unter „Rezepte" auf „Export" tippen, Text kopieren und hier einfügen.</p>
   <div class="acts"><button class="btn quiet" data-act="importSheet">Rezepte einfügen</button><button class="btn quiet" data-act="exportSheet">Alles exportieren</button></div>
-  <div class="acts" style="margin-top:24px"><button class="btn danger" data-act="logout">Abmelden</button><button class="btn ghost" data-act="syncNow">Jetzt abgleichen</button></div>`,'Einstellungen');
+  <div class="acts" style="margin-top:24px"><button class="btn danger" data-act="logout">Abmelden</button><button class="btn ghost" data-act="syncNow">Jetzt abgleichen</button><button class="btn ghost" data-act="diag">Verbindung prüfen</button></div>
+  <p class="small muted">Version ${APP_VERSION}</p>`,'Einstellungen');
 }
 function importSheet(){
   sheet(`<p class="small muted" style="margin-top:0">Füge hier den Export-Text ein. Rezepte mit gleichem Namen werden übersprungen. Fotos aus dem Prototyp werden nicht mitgenommen.</p>
@@ -438,6 +440,8 @@ document.addEventListener('click',async e=>{
       t.disabled=true;t.textContent='Verbindet …';
       try{await Cloud.join(u);S=emptyState();Sync.base=null;Sync.etag=null;cacheSave();run()}catch(x){setupGate(errText(x))}break}
     case 'settings':settingsSheet();break;
+    case 'diag':{t.disabled=true;t.textContent='Prüft …';let r;try{r=await Cloud.diagnose()}catch(x){r='FEHLER '+(x.detail||x.message)}
+      sheet(`<p class="small muted" style="margin-top:0">Ergebnis des Verbindungstests (Version ${APP_VERSION}). Mach bitte einen Screenshot davon.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px">${esc(r)}</pre>`,'Verbindungstest');break}
     case 'makeLink':try{t.disabled=true;settingsSheet(await Cloud.createLink())}catch(x){toast(errText(x));t.disabled=false}break;
     case 'copyLink':copyText($('#lnk'),'Link kopiert.');break;
     case 'syncNow':closeSheet();setSync('Gleicht ab …',false);queue(()=>isDirty()?doPush().then(doPull):doPull());break;

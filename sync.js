@@ -144,5 +144,27 @@ const Cloud=(()=>{
     try{const it=await find(name);if(it){await gx(item(it.id),{method:'DELETE'});files.delete(name)}}catch(e){}
   };
 
-  return {redirectUri,init,login,logout,account:()=>account,loc:()=>loc,createFolder,createLink,join,meta,readData,writeData,putFile,photoUrl,delFile};
+  /* Verbindungstest: legt eine Testdatei an, beschreibt, liest und löscht sie */
+  async function diagnose(){
+    const out=[];
+    const step=async(label,fn)=>{
+      try{const r=await fn();out.push('OK      '+label+(r?' · '+r:''));return true}
+      catch(e){out.push('FEHLER  '+label+' · '+(e.status||'')+' '+(e.detail||e.message)+(e.where?' · '+e.where:''));return false}
+    };
+    out.push('Ordner-ID: '+loc.folderId,'Laufwerk: '+loc.driveId+(loc.own?' (eigenes)':' (geteilt)'));
+    await step('Ordner lesen',async()=>{const j=await jx(base()+'?$select=id,name,folder');return j.name});
+    await step('Ordnerinhalt auflisten',async()=>{const m=await list();return [...m.keys()].join(', ')||'leer'});
+    let id=null;
+    await step('Testdatei anlegen',async()=>{
+      const it=await jx(base()+'/children',{method:'POST',headers:JSONH,body:JSON.stringify({name:'diagnose.txt',file:{},'@microsoft.graph.conflictBehavior':'replace'})});
+      id=it.id;return 'ok'});
+    if(id){
+      await step('Testdatei beschreiben',async()=>{const r=await gx(item(id)+'/content',{method:'PUT',headers:{'Content-Type':'text/plain'},body:'hallo'});if(!r.ok)throw await fail(r)});
+      await step('Testdatei lesen',async()=>{const r=await gx(item(id)+'/content');if(!r.ok)throw await fail(r);return await r.text()});
+      await step('Testdatei löschen',async()=>{const r=await gx(item(id),{method:'DELETE'});if(!r.ok)throw await fail(r)});
+    }
+    return out.join('\n');
+  }
+
+  return {diagnose,redirectUri,init,login,logout,account:()=>account,loc:()=>loc,createFolder,createLink,join,meta,readData,writeData,putFile,photoUrl,delFile};
 })();
