@@ -8,7 +8,7 @@ const Cloud=(()=>{
   const LOC_KEY='fk.loc';
   const redirectUri=location.origin+location.pathname.replace(/index\.html$/,'');
   const app=new msal.PublicClientApplication({
-    auth:{clientId:CLIENT_ID,authority:'https://login.microsoftonline.com/common',redirectUri,navigateToLoginRequestUrl:false},
+    auth:{clientId:CLIENT_ID,authority:'https://login.microsoftonline.com/consumers',redirectUri,navigateToLoginRequestUrl:false},
     cache:{cacheLocation:'localStorage'}
   });
   let account=null,loc=null;
