@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-26 f';
+const APP_VERSION='2026-10-27 g';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -66,7 +66,7 @@ function normalize(d){
 }
 let S=emptyState();
 const UI={tab:'plan',week:0,q:'',tag:'',horizon:7};
-let D=null,C=null;
+let D=null,C=null,PEND=[],AFTER=null,FOUND=[];
 const rec=id=>S.recipes.find(r=>r.id===id);
 const findPantry=name=>{const k=stem(name);
   return S.pantry.find(p=>stem(p.name)===k)||(k.length>=4?S.pantry.find(p=>{const q=stem(p.name);return q.length>=4&&(q.includes(k)||k.includes(q))}):undefined)};
@@ -194,6 +194,7 @@ function stepper(id,v){return `<span class="pers"><button data-act="pers" data-i
 function planView(){
   const mon=addDays(NOW,-((NOW.getDay()+6)%7)+UI.week*7), sun=addDays(mon,6);
   let h=`<div class="card hh"><div><b>Standard</b><div class="small muted">Für neue Mahlzeiten vorgewählt</div></div>${stepper('household',S.household)}</div>
+  <div class="card hh"><div><b>Ausgewogen essen?</b><div class="small muted">Einschätzung und Vorschläge nach eurem Plan</div></div><button class="btn sm" data-act="balance">Vorschläge</button></div>
   <div class="weeknav"><button class="arrow" data-act="week" data-d="-1" aria-label="Vorige Woche">‹</button>
   <div style="text-align:center"><h2 style="font-size:1.1rem">${UI.week===0?'Diese Woche':UI.week===1?'Nächste Woche':UI.week===-1?'Letzte Woche':'Woche ab '+fmtDay(mon)}</h2><div class="small muted">${fmtDay(mon)} – ${fmtDay(sun)}</div></div>
   <button class="arrow" data-act="week" data-d="1" aria-label="Nächste Woche">›</button></div><div style="height:12px"></div>`;
@@ -272,7 +273,7 @@ function sheet(inner,title){
   const s=$('#sheet'); s.innerHTML=`<div class="scrim" data-act="close"></div><div class="panel" role="dialog" aria-label="${esc(title)}"><div class="ph"><h2>${esc(title)}</h2><button class="close" data-act="close" aria-label="Schließen">×</button></div>${inner}</div>`;
   s.hidden=false; document.body.classList.add('lock'); hydrate(s);
 }
-function closeSheet(){$('#sheet').hidden=true;$('#sheet').innerHTML='';document.body.classList.remove('lock');D=null;C=null}
+function closeSheet(){$('#sheet').hidden=true;$('#sheet').innerHTML='';document.body.classList.remove('lock');D=null;C=null;PEND=[]}
 function toast(t){const e=$('#toast');e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,2600)}
 
 function detailSheet(){
@@ -317,6 +318,7 @@ function recipeForm(d,id){
   <label class="f" for="rz">Zubereitung (ein Schritt pro Zeile)</label><textarea id="rz">${esc(d.steps)}</textarea>
   <label class="f" for="newph">Fotos der Kochbuchseite (optional)</label>
   <div class="photos" id="exph">${(d.photos||[]).map(p=>`<span class="ph1" data-name="${esc(p.name)}"><img data-ph="${esc(p.name)}" alt="Foto aus dem Kochbuch"><button class="x" data-act="rmPhoto" aria-label="Foto entfernen">×</button></span>`).join('')}</div>
+  ${PEND.length?`<label class="chk"><input type="checkbox" id="keepph" checked> ${PEND.length>1?PEND.length+' eingelesene Fotos':'Eingelesenes Foto'} beim Rezept speichern</label>`:''}
   <input type="file" id="newph" accept="image/*" multiple>
   <div class="acts"><button class="btn" data-act="saveRecipe" data-id="${id||''}">Speichern</button>${id?`<button class="btn danger" data-act="delRecipe" data-id="${id}">Löschen</button>`:''}</div>`,id?'Rezept bearbeiten':'Neues Rezept');
 }
@@ -348,6 +350,10 @@ function settingsSheet(link){
   <h3 style="margin-top:20px">Rezepte übernehmen</h3>
   <p class="small muted">Aus dem Prototyp: dort unter „Rezepte" auf „Export" tippen, Text kopieren und hier einfügen.</p>
   <div class="acts"><button class="btn quiet" data-act="importSheet">Rezepte einfügen</button><button class="btn quiet" data-act="exportSheet">Alles exportieren</button></div>
+  <h3 style="margin-top:20px">Claude-Zugang</h3>
+  <p class="small muted">Für Foto-Auslesen, Rezeptsuche im Netz und Vorschläge. Der Schlüssel bleibt nur auf diesem Gerät.</p>
+  ${AI.has()?`<p class="small">Schlüssel gespeichert (endet auf …${esc(AI.get().slice(-4))}).</p><div class="acts"><button class="btn quiet sm" data-act="testKey">Testen</button><button class="btn danger sm" data-act="delKey">Entfernen</button></div>`
+    :`<input type="password" id="akey" placeholder="sk-ant-…" autocomplete="off" aria-label="Claude-Schlüssel"><div class="acts"><button class="btn quiet sm" data-act="saveKey">Speichern</button><button class="btn ghost sm" data-act="keyHelp">Wo bekomme ich den?</button></div>`}
   <div class="acts" style="margin-top:24px"><button class="btn danger" data-act="logout">Abmelden</button><button class="btn ghost" data-act="syncNow">Jetzt abgleichen</button><button class="btn ghost" data-act="diag">Verbindung prüfen</button><button class="btn ghost" data-act="update">App aktualisieren</button></div>
   <p class="small muted">Version ${APP_VERSION}</p>`,'Einstellungen');
 }
@@ -379,6 +385,82 @@ function doImport(){
   let p=0;
   for(const x of d.pantry||[])if(x&&x.name&&!findPantry(x.name)){S.pantry.push({id:uid(),name:String(x.name),loc:LOCS.includes(x.loc)?x.loc:'Sonstiges',level:[0,1,2].includes(x.level)?x.level:2});p++}
   closeSheet();UI.tab='rec';commit();toast(n+' Rezepte, '+p+' Vorratsartikel übernommen.');
+}
+
+/* ---------- Claude: Foto auslesen, Rezepte im Netz suchen, Vorschläge ---------- */
+const prefill=r=>({title:r.title||'',source:r.source||'',servings:Math.max(1,+r.servings||4),tags:(r.tags||[]).join(', '),ing:(r.ingredients||[]).join('\n'),steps:(r.steps||[]).join('\n'),photos:[]});
+function aiError(e){
+  if(e.code==='no-key')return 'Es ist kein Claude-Schlüssel hinterlegt.';
+  if(e.offline)return 'Keine Verbindung zu Claude.';
+  if(e.status===401)return 'Der Claude-Schlüssel wurde abgelehnt. Bitte unter ⋮ prüfen.';
+  if(e.status===429)return 'Gerade zu viele Anfragen. Bitte kurz warten.';
+  if(e.status===402||/credit|balance/i.test(e.message||''))return 'Das Guthaben im Anthropic-Konto ist aufgebraucht.';
+  return e.message||'Das hat nicht geklappt.';
+}
+function keySheet(next){
+  AFTER=next;
+  sheet(`<p style="margin-top:0">Dafür braucht die App einen Zugang zu Claude. Er läuft über dein Konto bei Anthropic und wird nach Verbrauch abgerechnet, in der Regel wenige Cent pro Anfrage.</p>
+  <ol class="steps small"><li>Öffne <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> und melde dich an.</li>
+  <li>Lade unter „Billing" etwas Guthaben auf und stelle ein Monatslimit ein.</li>
+  <li>Erzeuge unter „API keys" einen Schlüssel und kopiere ihn.</li></ol>
+  <label class="f" for="akey">Schlüssel</label><input type="password" id="akey" placeholder="sk-ant-…" autocomplete="off">
+  <p class="small muted">Der Schlüssel wird nur in diesem Browser gespeichert. Auf jedem Gerät der Familie ist er einmal einzugeben.</p>
+  <div class="acts"><button class="btn" data-act="saveKey">Speichern und weiter</button></div>`,'Claude-Zugang einrichten');
+}
+function addSheet(){
+  sheet(`<div class="choice"><button class="btn" data-act="aiPhoto">Foto aus dem Kochbuch auslesen</button>
+  <button class="btn quiet" data-act="aiSearch">Im Netz nach Rezepten suchen</button>
+  <button class="btn ghost" data-act="manual">Von Hand eingeben</button></div>`,'Rezept hinzufügen');
+}
+function photoSheet(){
+  if(!AI.has())return keySheet('aiPhoto');
+  sheet(`<p class="muted small" style="margin-top:0">Fotografiere die Rezeptseite. Geht das Rezept über zwei Seiten, wähle bis zu 4 Fotos.</p>
+  <input type="file" id="files" accept="image/*" multiple aria-label="Fotos wählen"><div class="acts"><button class="btn" id="go" data-act="doPhoto">Rezept auslesen</button></div>`,'Foto auslesen');
+}
+function searchSheet(){
+  if(!AI.has())return keySheet('aiSearch');
+  sheet(`<label class="f" for="sq" style="margin-top:0">Was möchtet ihr essen?</label><input type="text" id="sq" placeholder="z. B. italienisches Nudelgericht mit Ravioli">
+  <label class="chk"><input type="checkbox" id="spant" checked> Zutaten aus dem Vorrat bevorzugen</label>
+  <div class="acts"><button class="btn" id="go" data-act="doSearch">Suchen</button></div><div id="sres"></div>`,'Rezepte im Netz suchen');
+}
+async function doPhoto(){
+  const fs=[...$('#files').files].slice(0,4); if(!fs.length){toast('Bitte zuerst ein Foto wählen.');return}
+  const btn=$('#go'); btn.disabled=true; btn.textContent='Liest …';
+  try{
+    const bl=await Promise.all(fs.map(shrink));
+    const r=await AI.readRecipe(bl);
+    if(!r.title&&!(r.ingredients||[]).length){toast('Auf den Fotos wurde kein Rezept erkannt.');btn.disabled=false;btn.textContent='Rezept auslesen';return}
+    PEND=bl; recipeForm(prefill(r)); toast('Bitte kurz prüfen, dann speichern.');
+  }catch(e){btn.disabled=false;btn.textContent='Rezept auslesen';toast(aiError(e))}
+}
+async function doSearch(){
+  const q=$('#sq').value.trim(); if(q.length<3){toast('Bitte eingeben, worauf ihr Lust habt.');return}
+  const btn=$('#go'); btn.disabled=true; btn.textContent='Sucht …'; $('#sres').innerHTML='<p class="muted small">Das dauert etwa eine halbe Minute.</p>';
+  const pantry=$('#spant').checked?S.pantry.filter(p=>p.level===2).map(p=>p.name).slice(0,40):[];
+  try{
+    FOUND=await AI.searchRecipes({query:q,persons:S.household,pantry});
+    $('#sres').innerHTML=FOUND.length?`<p class="muted small">Tippe auf ein Rezept, um es zu prüfen und zu speichern. Die Texte sind zusammengefasst, die Quelle steht dabei.</p>`+FOUND.map((r,i)=>`<button class="card rcard" data-act="useRes" data-id="${i}"><h3>${esc(r.title)}</h3><div class="meta">${esc(r.summary||'')}</div>
+      <div class="meta">${r.servings||'?'} Portionen · ${r.ingredients.length} Zutaten · ${esc(hostOf(r.source))}</div><div class="tags">${(r.tags||[]).map(t=>`<span>${esc(t)}</span>`).join('')}</div></button>`).join('')
+      :'<p class="muted">Dazu wurde nichts Brauchbares gefunden. Versuche eine andere Beschreibung.</p>';
+  }catch(e){$('#sres').innerHTML='';toast(aiError(e))}
+  btn.disabled=false;btn.textContent='Erneut suchen';
+}
+const hostOf=u=>{try{return new URL(u).hostname.replace(/^www\./,'')}catch(e){return ''}};
+async function balanceSheet(){
+  if(!AI.has())return keySheet('balance');
+  const from=iso(addDays(NOW,-10)),to=iso(addDays(NOW,7));
+  const meals=S.plan.filter(e=>e.date>=from&&e.date<=to).sort((a,b)=>a.date.localeCompare(b.date)).map(e=>{const r=rec(e.rid);return r?`${e.date} ${e.slot}: ${r.title} (${r.ing.map(g=>g.name).join(', ')})`:null}).filter(Boolean);
+  if(meals.length<3){toast('Plane zuerst ein paar Mahlzeiten, dann gibt es etwas zu beurteilen.');return}
+  sheet('<p class="muted">Claude sieht sich euren Plan an …</p>','Ausgewogen essen?');
+  try{
+    const own=S.recipes.map(r=>`${r.id} | ${r.title} | ${r.tags.join(', ')} | ${r.ing.map(g=>g.name).slice(0,12).join(', ')}`);
+    const res=await AI.balance({persons:S.household,meals,own});
+    FOUND=res.suggestions.filter(s=>s.kind==='new'||rec(s.recipe_id));
+    sheet(`<p style="margin-top:0">${esc(res.assessment)}</p><p class="small muted">Das ist eine grobe Orientierung und keine Ernährungsberatung.</p>
+    <h3>Vorschläge</h3>${FOUND.map((s,i)=>{const own=s.kind==='own';const t=own?rec(s.recipe_id).title:s.title;
+      return `<div class="card rcard" style="cursor:default"><h3>${esc(t)}</h3><div class="meta">${esc(s.why)}</div><div class="meta">${own?'Aus eurer Sammlung':'Neues Rezept'}</div>
+      <div class="acts" style="margin-top:8px">${own?`<button class="btn sm" data-act="planOwn" data-id="${s.recipe_id}">Einplanen</button>`:`<button class="btn sm" data-act="useSugg" data-id="${i}">Rezept ansehen</button>`}</div></div>`}).join('')}`,'Ausgewogen essen?');
+  }catch(e){closeSheet();toast(aiError(e))}
 }
 
 /* ---------- Anmeldung und Start ---------- */
@@ -472,7 +554,23 @@ document.addEventListener('click',async e=>{
     case 'cl':C.ch[id]=d;cookedSheet();break;
     case 'applyCooked':{for(const [pid,v] of Object.entries(C.ch)){const p=S.pantry.find(x=>x.id===pid);if(p)p.level=v}closeSheet();commit();toast('Vorrat angepasst.');break}
     case 'tag':UI.tag=UI.tag===id?'':id;render();break;
-    case 'newRecipe':recipeForm({title:'',source:'',servings:S.household,tags:'',ing:'',steps:'',photos:[]});break;
+    case 'newRecipe':addSheet();break;
+    case 'manual':PEND=[];recipeForm({title:'',source:'',servings:S.household,tags:'',ing:'',steps:'',photos:[]});break;
+    case 'aiPhoto':photoSheet();break;
+    case 'aiSearch':searchSheet();break;
+    case 'doPhoto':doPhoto();break;
+    case 'doSearch':doSearch();break;
+    case 'useRes':{PEND=[];recipeForm(prefill(FOUND[+id]));toast('Bitte prüfen, dann speichern.');break}
+    case 'balance':balanceSheet();break;
+    case 'planOwn':planSheet(TODAY,id);break;
+    case 'useSugg':{PEND=[];recipeForm(prefill(FOUND[+id]));toast('Bitte prüfen, dann speichern.');break}
+    case 'keyHelp':keySheet(null);break;
+    case 'saveKey':{const v=($('#akey')?.value||'').trim();
+      if(!/^sk-ant-/.test(v)){toast('Das sieht nicht nach einem Schlüssel aus. Er beginnt mit sk-ant-.');break}
+      AI.set(v);toast('Schlüssel gespeichert.');const n=AFTER;AFTER=null;closeSheet();
+      if(n==='aiPhoto')photoSheet();else if(n==='aiSearch')searchSheet();else if(n==='balance')balanceSheet();else settingsSheet();break}
+    case 'delKey':AI.set('');toast('Schlüssel entfernt.');settingsSheet();break;
+    case 'testKey':{t.disabled=true;t.textContent='Testet …';try{await AI.test();toast('Der Zugang funktioniert.')}catch(x){toast(aiError(x))}t.disabled=false;t.textContent='Testen';break}
     case 'editRecipe':{const r=rec(D.rid);closeSheet();recipeForm({title:r.title,source:r.source,servings:r.servings,tags:r.tags.join(', '),ing:r.ing.map(lineStr).join('\n'),steps:r.steps.join('\n'),photos:r.photos||[]},r.id);break}
     case 'rmPhoto':t.closest('.ph1').remove();break;
     case 'saveRecipe':{
@@ -480,7 +578,7 @@ document.addEventListener('click',async e=>{
       const ing=$('#ri').value.split('\n').map(parseLine).filter(Boolean); if(!ing.length){toast('Bitte mindestens eine Zutat eingeben.');break}
       const r={id:id||uid(),title,source:$('#rs').value.trim(),servings:Math.max(1,+$('#rv').value||4),tags:$('#rg').value.split(',').map(s=>s.trim()).filter(Boolean),ing,
         steps:$('#rz').value.split('\n').map(s=>s.trim()).filter(Boolean),photos:[...document.querySelectorAll('#exph .ph1')].map(el=>({name:el.dataset.name}))};
-      storeRecipe(r,[...$('#newph').files],t);break}
+      storeRecipe(r,[...$('#newph').files,...($('#keepph')?.checked?PEND:[])],t);break}
     case 'delRecipe':(rec(id)?.photos||[]).forEach(p=>Cloud.delFile(p.name));S.recipes=S.recipes.filter(x=>x.id!==id);S.plan=S.plan.filter(x=>x.rid!==id);closeSheet();commit();toast('Rezept gelöscht.');break;
     case 'lvl':{const p=S.pantry.find(x=>x.id===id);if(p){p.level=d;commit()}break}
     case 'rmPantry':S.pantry=S.pantry.filter(x=>x.id!==id);commit();break;
@@ -502,6 +600,6 @@ document.addEventListener('submit',e=>{
   if(f==='addPantry'){const n=$('#pn').value.trim();if(!n)return;S.pantry.push({id:uid(),name:n,loc:$('#pl').value,level:2});commit();$('#pn').focus()}
   if(f==='addExtra'){const g=parseLine($('#xn').value);if(!g)return;S.extras.push({id:uid(),name:g.name,amount:g.amount,unit:g.unit,cat:guess(g.name)});commit();$('#xn').focus()}
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet();if(e.key==='Enter'&&e.target.id==='sq')doSearch()});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 start();

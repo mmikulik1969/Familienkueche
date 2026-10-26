@@ -164,3 +164,6 @@ header.top .hr{display:flex;align-items:center;gap:8px}
 code.k{font-family:ui-monospace,monospace;font-size:.85em;background:var(--tint);padding:1px 5px;border-radius:5px}
 [hidden]{display:none!important}
 img{max-width:100%}
+
+.choice{display:grid;gap:10px}
+.choice .btn{min-height:54px;font-size:1rem}
