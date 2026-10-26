@@ -1,0 +1,42 @@
+# Familienküche
+
+Rezepte aus Kochbüchern, Wochenplan, grober Vorrat und eine Einkaufsliste, die nur kauft, was fehlt.
+Die App läuft im Browser (Handy und Computer) und speichert alles im OneDrive der Familie.
+
+Adresse: https://mmikulik1969.github.io/familienkueche/
+
+## Aufbau
+
+| Datei | Aufgabe |
+|---|---|
+| `index.html`, `style.css` | Seite und Gestaltung |
+| `app.js` | Rezepte, Plan, Vorrat, Einkauf, Abgleich der Änderungen |
+| `sync.js` | Microsoft-Anmeldung und Zugriff auf OneDrive (Microsoft Graph) |
+| `vendor/msal-browser.min.js` | Microsoft-Anmeldebibliothek (MSAL 3.28.1, MIT-Lizenz), mitgeliefert statt von einem Fremdserver geladen |
+| `sw.js`, `manifest.webmanifest` | Installierbar auf dem Startbildschirm, offline mit zuletzt geladenem Stand |
+
+Es gibt keinen eigenen Server. Die Daten liegen in OneDrive im Ordner `Familienkueche`
+(`daten.json` und `foto-*.jpg`).
+
+## Einrichtung
+
+1. **GitHub Pages:** Settings → Pages → Branch `main`, Ordner `/ (root)`.
+2. **Azure-App:** Die Client-ID steht in `sync.js` (`CLIENT_ID`). In der App-Registrierung müssen stehen:
+   - Plattform „Single-Page-Anwendung" mit der Umleitungs-URI `https://mmikulik1969.github.io/familienkueche/`
+   - Kontotypen: Organisationsverzeichnisse und persönliche Microsoft-Konten
+   - API-Berechtigungen (delegiert, Microsoft Graph): `User.Read`, `Files.ReadWrite.All`
+3. **Erste Person:** Öffnet die Adresse, meldet sich an, tippt „Ordner anlegen". Dann ⋮ → „Link erzeugen" und den Link an die Familie schicken.
+4. **Alle anderen:** Öffnen die Adresse, melden sich mit ihrem Microsoft-Konto an, fügen den Link ein. Danach „Zum Startbildschirm hinzufügen".
+
+## Wie Änderungen zusammengeführt werden
+
+Jedes Gerät merkt sich den zuletzt abgeglichenen Stand. Beim Speichern werden nur die eigenen Änderungen
+auf den aktuellen Stand in OneDrive gelegt. Wer gleichzeitig verschiedene Dinge ändert, verliert nichts.
+Ändern zwei Personen genau dasselbe Rezept oder denselben Artikel, gewinnt die später gespeicherte Änderung.
+Alle 20 Sekunden und beim Öffnen prüft die App auf Neuigkeiten.
+
+## Grenzen
+
+- Der Familien-Link erlaubt jedem, der ihn kennt, den Ordner zu ändern. Nicht öffentlich weitergeben, bei Bedarf in OneDrive widerrufen.
+- Kochbuchfotos werden nicht automatisch ausgelesen. Sie lassen sich an ein Rezept anhängen. Die Zutaten werden abgetippt oder eingefügt.
+- Der Stand nach der Anmeldung hält etwa einen Tag. Danach fragt Microsoft einmal neu an.

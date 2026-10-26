@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Familienküche</title>
+<meta name="theme-color" content="#1d6c75">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Familienküche">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Familienküche</h1>
+    <div class="hr">
+      <div class="sub"><div id="today"></div><div id="sync"></div></div>
+      <button class="iconbtn" id="gear" data-act="settings" aria-label="Einstellungen" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+    </div>
+  </header>
+  <div id="app"><p class="muted">Lädt …</p></div>
+</div>
+<nav class="tabs" id="tabnav" hidden><div class="in" id="tabs"></div></nav>
+<div id="sheet" hidden></div>
+<div id="toast" hidden></div>
+<script src="vendor/msal-browser.min.js"></script>
+<script src="sync.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
