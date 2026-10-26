@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-26 d';
+const APP_VERSION='2026-10-26 e';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);

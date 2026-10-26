@@ -49,23 +49,28 @@ const Cloud=(()=>{
     return r.status===204?null:r.json();
   }
   const JSONH={'Content-Type':'application/json'};
+  const FOLDER='Familienkueche';
   const fixId=d=>/^[0-9a-f]{16}$/i.test(d)?d.toUpperCase():d; // private OneDrive-IDs sind großgeschrieben gültig
   const drv=()=>loc.own?'/me/drive':`/drives/${fixId(loc.driveId)}`;
   const item=id=>`${drv()}/items/${id}`;
-  const base=()=>item(loc.folderId);
-  let files=new Map(); // Dateiname -> {id,name,eTag} im Ordner
+  /* Eigener Ordner: Zugriff über den Pfad (kommt ohne IDs aus, die bei manchen privaten Konten nicht ansprechbar sind).
+     Geteilter Ordner: Zugriff über IDs, da der Pfad dem Besitzer gehört. */
+  const folderGet=()=>loc.own?`/me/drive/root:/${FOLDER}`:item(loc.folderId);
+  const folderRef=()=>loc.own?`/me/drive/root:/${FOLDER}:`:item(loc.folderId);
+  let files=new Map(); // nur geteilter Ordner: Dateiname -> {id,name,eTag}
   const setLoc=l=>{loc=l;files=new Map();try{localStorage.setItem(LOC_KEY,JSON.stringify(l))}catch(e){}};
+  const cont=r=>r.includes('root:')?r+':/content':r+'/content';
 
   /* Ordner anlegen (erste Person) oder per Link beitreten (alle anderen) */
   async function createFolder(){
     let it;
-    try{it=await jx('/me/drive/root/children',{method:'POST',headers:JSONH,body:JSON.stringify({name:'Familienkueche',folder:{},'@microsoft.graph.conflictBehavior':'fail'})})}
-    catch(e){if(e.status!==409)throw e;it=await jx('/me/drive/root:/Familienkueche')}
+    try{it=await jx('/me/drive/root/children',{method:'POST',headers:JSONH,body:JSON.stringify({name:FOLDER,folder:{},'@microsoft.graph.conflictBehavior':'fail'})})}
+    catch(e){if(e.status!==409)throw e;it=await jx(`/me/drive/root:/${FOLDER}`)}
     setLoc({driveId:it.parentReference.driveId,folderId:it.id,own:true});
     return loc;
   }
   async function createLink(){
-    const r=await jx(`${base()}/createLink`,{method:'POST',headers:JSONH,body:JSON.stringify({type:'edit',scope:'anonymous'})});
+    const r=await jx(`${folderRef()}/createLink`,{method:'POST',headers:JSONH,body:JSON.stringify({type:'edit',scope:'anonymous'})});
     return r.link.webUrl;
   }
   async function join(url){
@@ -76,9 +81,9 @@ const Cloud=(()=>{
     return loc;
   }
 
-  /* Dateien im Ordner: immer über die Datei-ID ansprechen, nie über Ordner-ID plus Pfad */
+  /* Dateien im Ordner */
   async function list(){
-    let url=`${base()}/children?$select=id,name,eTag&$top=200`; const m=new Map();
+    let url=`${folderRef()}/children?$select=id,name,eTag&$top=200`; const m=new Map();
     while(url){const j=await jx(url);for(const it of j.value)m.set(it.name,it);url=j['@odata.nextLink']||null}
     files=m; return m;
   }
@@ -88,60 +93,63 @@ const Cloud=(()=>{
   }
   async function ensure(name){
     let it=await find(name); if(it)return it;
-    try{it=await jx(base()+'/children',{method:'POST',headers:JSONH,body:JSON.stringify({name,file:{},'@microsoft.graph.conflictBehavior':'fail'})})}
+    try{it=await jx(folderRef()+'/children',{method:'POST',headers:JSONH,body:JSON.stringify({name,file:{},'@microsoft.graph.conflictBehavior':'fail'})})}
     catch(e){if(e.status!==409)throw e;it=await find(name,true)}
     files.set(name,it); return it;
+  }
+  /* Adresse einer Datei; null, wenn sie (im geteilten Ordner) nicht existiert */
+  async function ref(name,create){
+    if(loc.own)return `/me/drive/root:/${FOLDER}/${encodeURIComponent(name)}`;
+    const it=create?await ensure(name):await find(name);
+    return it?item(it.id):null;
   }
 
   /* daten.json */
   async function meta(){
-    const it=files.get('daten.json');
-    if(it){
-      const r=await gx(item(it.id)+'?$select=id,eTag');
-      if(r.ok){const j=await r.json();files.set('daten.json',{...it,eTag:j.eTag});return j}
-      if(r.status!==404)throw await fail(r);
-      files.delete('daten.json');
-    }
-    return find('daten.json',true);
+    const r0=await ref('daten.json'); if(!r0)return null;
+    const r=await gx(r0+'?$select=id,eTag');
+    if(r.status===404){files.delete('daten.json');return loc.own?null:meta2()}
+    if(!r.ok)throw await fail(r);
+    return r.json();
   }
+  async function meta2(){files=new Map();const r0=await ref('daten.json');if(!r0)return null;const r=await gx(r0+'?$select=id,eTag');return r.ok?r.json():null}
   async function readData(){
     const m=await meta(); if(!m)return null;
-    const j=await jx(item(m.id));
+    const r0=await ref('daten.json'); const j=await jx(r0);
     let r=null;
     try{if(j['@microsoft.graph.downloadUrl'])r=await fetch(j['@microsoft.graph.downloadUrl'])}catch(e){}
-    if(!r||!r.ok)r=await gx(item(m.id)+'/content');
+    if(!r||!r.ok)r=await gx(cont(r0));
     if(!r.ok)throw await fail(r);
     const txt=await r.text();
     return {etag:j.eTag,data:txt.trim()?JSON.parse(txt):null};
   }
   async function writeData(json,etag){
-    const it=await ensure('daten.json');
+    const r0=await ref('daten.json',true);
     const h={'Content-Type':'application/json'}; if(etag)h['If-Match']=etag;
-    const r=await gx(item(it.id)+'/content',{method:'PUT',headers:h,body:json});
+    const r=await gx(cont(r0),{method:'PUT',headers:h,body:json});
     if(r.status===412){const x=new Error('conflict');x.status=412;throw x}
     if(!r.ok)throw await fail(r);
-    const j=await r.json(); files.set('daten.json',{id:it.id,name:'daten.json',eTag:j.eTag});
-    return j.eTag;
+    return (await r.json()).eTag;
   }
 
   /* Fotos */
   const photos=new Map();
   async function putFile(name,blob){
-    const it=await ensure(name);
-    const r=await gx(item(it.id)+'/content',{method:'PUT',headers:{'Content-Type':blob.type||'image/jpeg'},body:blob});
+    const r0=await ref(name,true);
+    const r=await gx(cont(r0),{method:'PUT',headers:{'Content-Type':blob.type||'image/jpeg'},body:blob});
     if(!r.ok)throw await fail(r);
     photos.set(name,URL.createObjectURL(blob));
   }
   async function photoUrl(name){
     if(photos.has(name))return photos.get(name);
-    const it=await find(name); if(!it)throw new Error('Foto nicht gefunden');
-    const r=await gx(item(it.id)+'/content');
+    const r0=await ref(name); if(!r0)throw new Error('Foto nicht gefunden');
+    const r=await gx(cont(r0));
     if(!r.ok)throw await fail(r);
     const u=URL.createObjectURL(await r.blob()); photos.set(name,u); return u;
   }
   const delFile=async name=>{
     photos.delete(name);
-    try{const it=await find(name);if(it){await gx(item(it.id),{method:'DELETE'});files.delete(name)}}catch(e){}
+    try{const r0=await ref(name);if(r0){await gx(r0,{method:'DELETE'});files.delete(name)}}catch(e){}
   };
 
   /* Verbindungstest: legt eine Testdatei an, beschreibt, liest und löscht sie */
@@ -151,17 +159,16 @@ const Cloud=(()=>{
       try{const r=await fn();out.push('OK      '+label+(r?' · '+r:''));return true}
       catch(e){out.push('FEHLER  '+label+' · '+(e.status||'')+' '+(e.detail||e.message)+(e.where?' · '+e.where:''));return false}
     };
-    out.push('Ordner-ID: '+loc.folderId,'Laufwerk: '+loc.driveId+(loc.own?' (eigenes)':' (geteilt)'));
-    await step('Ordner lesen',async()=>{const j=await jx(base()+'?$select=id,name,folder');return j.name});
+    out.push('Ordner-ID: '+loc.folderId,'Laufwerk: '+loc.driveId+(loc.own?' (eigenes, Zugriff über Pfad)':' (geteilt, Zugriff über IDs)'));
+    await step('Ordner lesen',async()=>{const j=await jx(folderGet()+'?$select=id,name,folder');return j.name});
     await step('Ordnerinhalt auflisten',async()=>{const m=await list();return [...m.keys()].join(', ')||'leer'});
-    let id=null;
-    await step('Testdatei anlegen',async()=>{
-      const it=await jx(base()+'/children',{method:'POST',headers:JSONH,body:JSON.stringify({name:'diagnose.txt',file:{},'@microsoft.graph.conflictBehavior':'replace'})});
-      id=it.id;return 'ok'});
-    if(id){
-      await step('Testdatei beschreiben',async()=>{const r=await gx(item(id)+'/content',{method:'PUT',headers:{'Content-Type':'text/plain'},body:'hallo'});if(!r.ok)throw await fail(r)});
-      await step('Testdatei lesen',async()=>{const r=await gx(item(id)+'/content');if(!r.ok)throw await fail(r);return await r.text()});
-      await step('Testdatei löschen',async()=>{const r=await gx(item(id),{method:'DELETE'});if(!r.ok)throw await fail(r)});
+    const ok=await step('Testdatei anlegen und beschreiben',async()=>{
+      const r0=await ref('diagnose.txt',true);
+      const r=await gx(cont(r0),{method:'PUT',headers:{'Content-Type':'text/plain'},body:'hallo'});
+      if(!r.ok)throw await fail(r);});
+    if(ok){
+      await step('Testdatei lesen',async()=>{const r=await gx(cont(await ref('diagnose.txt')));if(!r.ok)throw await fail(r);return await r.text()});
+      await step('Testdatei löschen',async()=>{const r=await gx(await ref('diagnose.txt'),{method:'DELETE'});if(!r.ok)throw await fail(r);files.delete('diagnose.txt')});
     }
     return out.join('\n');
   }
