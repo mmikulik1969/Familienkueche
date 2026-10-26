@@ -388,7 +388,8 @@ const gateErr=m=>`<div class="err" role="alert">${esc(m)}</div>`;
 function loginGate(err){
   gate(`<div class="card"><h2>Willkommen</h2><p class="muted">Melde dich mit deinem privaten Microsoft-Konto an. Rezepte, Vorrat und Fotos liegen danach im OneDrive der Familie.</p>
   <button class="btn" data-act="login">Mit Microsoft anmelden</button>${err?gateErr(err):''}</div>
-  <div class="acts"><button class="btn quiet sm" data-act="reset">Klappt nicht? Anmeldung zurücksetzen</button></div>`);
+  <div class="acts"><button class="btn quiet sm" data-act="reset">Klappt nicht? Anmeldung zurücksetzen</button></div>
+  <p class="small muted" style="overflow-wrap:anywhere">Rücksprung-Adresse dieser App (muss in Azure genau so stehen):<br><code class="k">${esc(Cloud.redirectUri)}</code></p>`);
 }
 function setupGate(err){
   const a=Cloud.account();

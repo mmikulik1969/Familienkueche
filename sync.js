@@ -112,5 +112,5 @@ const Cloud=(()=>{
   }
   const delFile=async name=>{photos.delete(name);try{await gx(file(name),{method:'DELETE'})}catch(e){}};
 
-  return {init,login,logout,account:()=>account,loc:()=>loc,createFolder,createLink,join,meta,readData,writeData,putFile,photoUrl,delFile};
+  return {redirectUri,init,login,logout,account:()=>account,loc:()=>loc,createFolder,createLink,join,meta,readData,writeData,putFile,photoUrl,delFile};
 })();
