@@ -3,7 +3,7 @@
 Rezepte aus Kochbüchern, Wochenplan, grober Vorrat und eine Einkaufsliste, die nur kauft, was fehlt.
 Die App läuft im Browser (Handy und Computer) und speichert alles im OneDrive der Familie.
 
-Adresse: https://mmikulik1969.github.io/familienkueche/
+Adresse: https://mmikulik1969.github.io/Familienkueche/
 
 ## Aufbau
 
@@ -22,7 +22,7 @@ Es gibt keinen eigenen Server. Die Daten liegen in OneDrive im Ordner `Familienk
 
 1. **GitHub Pages:** Settings → Pages → Branch `main`, Ordner `/ (root)`.
 2. **Azure-App:** Die Client-ID steht in `sync.js` (`CLIENT_ID`). In der App-Registrierung müssen stehen:
-   - Plattform „Single-Page-Anwendung" mit der Umleitungs-URI `https://mmikulik1969.github.io/familienkueche/`
+   - Plattform „Single-Page-Anwendung" mit der Umleitungs-URI `https://mmikulik1969.github.io/Familienkueche/`
    - Kontotypen: Organisationsverzeichnisse und persönliche Microsoft-Konten
    - API-Berechtigungen (delegiert, Microsoft Graph): `User.Read`, `Files.ReadWrite.All`
 3. **Erste Person:** Öffnet die Adresse, meldet sich an, tippt „Ordner anlegen". Dann ⋮ → „Link erzeugen" und den Link an die Familie schicken.
