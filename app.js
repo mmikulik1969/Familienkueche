@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-26 e';
+const APP_VERSION='2026-10-26 f';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -348,7 +348,7 @@ function settingsSheet(link){
   <h3 style="margin-top:20px">Rezepte übernehmen</h3>
   <p class="small muted">Aus dem Prototyp: dort unter „Rezepte" auf „Export" tippen, Text kopieren und hier einfügen.</p>
   <div class="acts"><button class="btn quiet" data-act="importSheet">Rezepte einfügen</button><button class="btn quiet" data-act="exportSheet">Alles exportieren</button></div>
-  <div class="acts" style="margin-top:24px"><button class="btn danger" data-act="logout">Abmelden</button><button class="btn ghost" data-act="syncNow">Jetzt abgleichen</button><button class="btn ghost" data-act="diag">Verbindung prüfen</button></div>
+  <div class="acts" style="margin-top:24px"><button class="btn danger" data-act="logout">Abmelden</button><button class="btn ghost" data-act="syncNow">Jetzt abgleichen</button><button class="btn ghost" data-act="diag">Verbindung prüfen</button><button class="btn ghost" data-act="update">App aktualisieren</button></div>
   <p class="small muted">Version ${APP_VERSION}</p>`,'Einstellungen');
 }
 function importSheet(){
@@ -431,6 +431,8 @@ document.addEventListener('click',async e=>{
   switch(a){
     case 'login':t.disabled=true;Cloud.login().catch(x=>{t.disabled=false;loginGate(x.message||String(x))});break;
     case 'logout':Cloud.logout();break;
+    case 'update':{try{for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister();for(const k of await caches.keys())await caches.delete(k)}catch(x){}
+      location.replace(location.pathname+'?neu='+Date.now());break}
     case 'reset':{try{localStorage.clear();sessionStorage.clear()}catch(x){}
       try{for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister();for(const k of await caches.keys())await caches.delete(k)}catch(x){}
       location.replace(location.pathname);break}
