@@ -39,7 +39,7 @@ const Cloud=(()=>{
     catch(e){const x=new Error('offline');x.offline=true;throw x}
   }
   async function fail(r){
-    const x=new Error('HTTP '+r.status);x.status=r.status;
+    const x=new Error('HTTP '+r.status);x.status=r.status;try{x.where=new URL(r.url).pathname.replace('/v1.0','').slice(0,90)}catch(e){}
     try{x.detail=(await r.json())?.error?.message}catch(e){}
     return x;
   }
@@ -50,7 +50,8 @@ const Cloud=(()=>{
   }
   const JSONH={'Content-Type':'application/json'};
   const setLoc=l=>{loc=l;try{localStorage.setItem(LOC_KEY,JSON.stringify(l))}catch(e){}};
-  const base=()=>`/drives/${loc.driveId}/items/${loc.folderId}`;
+  const fixId=d=>/^[0-9a-f]{16}$/i.test(d)?d.toUpperCase():d; // private OneDrive-IDs sind großgeschrieben gültig
+  const base=()=>loc.own?`/me/drive/items/${loc.folderId}`:`/drives/${fixId(loc.driveId)}/items/${loc.folderId}`;
   const file=n=>`${base()}:/${encodeURIComponent(n)}`;
 
   /* Ordner anlegen (erste Person) oder per Link beitreten (alle anderen) */

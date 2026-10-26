@@ -106,7 +106,7 @@ function commit(){render();cacheSave();schedulePush()}
 function onError(e){
   if(e.offline){setSync('Offline: wird später gesendet',false);return}
   if(e.status===401||e.status===403){setSync('Keine Berechtigung für den Ordner',false);return}
-  setSync('Fehler: '+(e.detail||e.message),false);
+  setSync('Fehler: '+(e.detail||e.message)+(e.where?' · '+e.status+' '+e.where:''),false);
 }
 function applyRemote(rd){
   const remote=normalize(rd.data),dirty=isDirty()&&Sync.base;
