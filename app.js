@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-29 k';
+const APP_VERSION='2026-10-30 l';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -57,10 +57,12 @@ function fmtAmt(a,u){
 }
 
 /* ---------- Zustand ---------- */
-const emptyState=()=>({v:1,household:4,recipes:[],pantry:[],plan:[],extras:[],checked:{}});
+const emptyState=()=>({v:1,household:4,recipes:[],pantry:[],plan:[],extras:[],members:[],att:{},openIn:true,checked:{}});
 function normalize(d){
   const s=emptyState(); if(!d||typeof d!=='object')return s;
-  for(const c of ['recipes','pantry','plan','extras'])if(Array.isArray(d[c]))s[c]=d[c];
+  for(const c of ['recipes','pantry','plan','extras','members'])if(Array.isArray(d[c]))s[c]=d[c];
+  if(d.att&&typeof d.att==='object')s.att=d.att;
+  if(typeof d.openIn==='boolean')s.openIn=d.openIn;
   if(d.checked&&typeof d.checked==='object')s.checked=d.checked;
   if(Number.isFinite(d.household))s.household=d.household;
   return s;
@@ -76,7 +78,7 @@ const findPantry=name=>{const k=stem(name);
    Jedes Gerät merkt sich den zuletzt abgeglichenen Stand (base). Beim Speichern werden nur
    die eigenen Änderungen gegenüber base auf den aktuellen Stand in OneDrive gelegt. */
 const Sync={etag:null,base:null,timer:null,chain:Promise.resolve(),online:true};
-const COLL=['recipes','pantry','plan','extras'];
+const COLL=['recipes','pantry','plan','extras','members'];
 function mergeState(base,local,remote){
   const out=clone(remote);
   for(const c of COLL){
@@ -95,6 +97,13 @@ function mergeState(base,local,remote){
   for(const k of Object.keys(local.checked))if(!(k in bc))ch[k]=true;
   out.checked=ch;
   out.household=local.household!==base.household?local.household:remote.household;
+  out.openIn=local.openIn!==base.openIn?local.openIn:remote.openIn;
+  const flat=o=>{const m=new Map();for(const [k,v] of Object.entries(o||{})){for(const [id,s] of Object.entries(v.m||{}))m.set(k+'\0m\0'+id,s);if(v.g)m.set(k+'\0g',v.g)}return m};
+  const fb=flat(base.att),fl=flat(local.att),fm=flat(remote.att);
+  for(const k of fb.keys())if(!fl.has(k))fm.delete(k);
+  for(const [k,v] of fl)if(!fb.has(k)||fb.get(k)!==v)fm.set(k,v);
+  out.att={};
+  for(const [k,v] of fm){const [day,t,id]=k.split('\0');const e=out.att[day]||(out.att[day]={m:{},g:0});if(t==='g')e.g=v;else e.m[id]=v}
   return out;
 }
 const isDirty=()=>!Sync.base||JSON.stringify(S)!==JSON.stringify(Sync.base);
@@ -158,12 +167,75 @@ function startSync(){
   window.addEventListener('online',tick);
 }
 
+/* ---------- Anwesenheit am Abend ---------- */
+const akey=(d,slot='Abend')=>d+'|'+slot;
+const getMe=()=>{try{const id=localStorage.getItem('fk.me');return S.members.some(m=>m.id===id)?id:''}catch(e){return ''}};
+const setMe=id=>{try{localStorage.setItem('fk.me',id)}catch(e){}};
+function attNums(d,slot='Abend'){
+  const a=S.att[akey(d,slot)]||{m:{},g:0};
+  const inn=S.members.filter(m=>a.m[m.id]==='in').length, out=S.members.filter(m=>a.m[m.id]==='out').length;
+  return {inn,out,open:S.members.length-inn-out,g:a.g||0,any:!!(inn||out||a.g)};
+}
+function attCount(d,slot){
+  const n=attNums(d,slot); if(!n.any)return null;
+  return Math.max(1,n.inn+(S.openIn!==false?n.open:0)+n.g);
+}
+const pers=e=>e.manual?e.persons:(attCount(e.date,e.slot)??e.persons);
+const isAuto=e=>!e.manual&&attCount(e.date,e.slot)!=null;
+function setAtt(d,id,v){
+  const k=akey(d),a=S.att[k]||(S.att[k]={m:{},g:0});
+  if(v)a.m[id]=v; else delete a.m[id];
+  if(!Object.keys(a.m).length&&!a.g)delete S.att[k];
+}
+function attSummary(d){
+  const n=attNums(d); if(!S.members.length)return '';
+  const p=[`${n.inn} dabei`]; if(n.open)p.push(`${n.open} offen`); if(n.out)p.push(`${n.out} nicht`); if(n.g)p.push(`+${n.g} Gäste`);
+  return p.join(' · ');
+}
+function attCard(){
+  if(!S.members.length)return `<div class="card hh"><div><b>Wer isst mit?</b><div class="small muted">Familienmitglieder anlegen, dann könnt ihr euch für den Abend an- und abmelden.</div></div><button class="btn sm" data-act="members">Einrichten</button></div>`;
+  const me=getMe();
+  let h=`<div class="card att"><div class="att-h"><b>Abendessen: wer ist dabei?</b><button class="btn sm quiet" data-act="members">Mitglieder</button></div>`;
+  if(!me)h+=`<div class="small muted" style="margin-bottom:6px">Damit du dich selbst anmelden kannst: <button class="linkbtn" data-act="members">Wer bist du?</button></div>`;
+  for(let i=0;i<3;i++){
+    const d=addDays(NOW,i),k=iso(d),st=me?S.att[akey(k)]?.m?.[me]:'';
+    h+=`<div class="att-row"><button class="att-d" data-act="att" data-id="${k}"><b>${i===0?'Heute':i===1?'Morgen':fmtDay(d)}</b><span class="small muted">${esc(attSummary(k))}</span></button>
+    ${me?`<span class="seg"><button class="l2${st==='in'?' on':''}" data-act="meSet" data-id="${k}" data-v="in">Dabei</button><button class="l0${st==='out'?' on':''}" data-act="meSet" data-id="${k}" data-v="out">Nicht dabei</button></span>`:''}</div>`;
+  }
+  return h+'</div>';
+}
+function attSheet(k){
+  AT=k; const a=S.att[akey(k)]||{m:{},g:0}, n=attNums(k), c=attCount(k,'Abend');
+  const meals=S.plan.filter(e=>e.date===k&&e.slot==='Abend').map(e=>({e,r:rec(e.rid)})).filter(x=>x.r);
+  sheet(`<div class="card">${S.members.map(m=>{const v=a.m[m.id]||'';
+    return `<div class="prow"><span class="n">${esc(m.name)}</span><span class="seg">
+    <button class="l2${v==='in'?' on':''}" data-act="attSet" data-id="${m.id}" data-v="in">Dabei</button>
+    <button class="l1${v===''?' on':''}" data-act="attSet" data-id="${m.id}" data-v="">Offen</button>
+    <button class="l0${v==='out'?' on':''}" data-act="attSet" data-id="${m.id}" data-v="out">Nicht</button></span></div>`}).join('')}</div>
+  <div class="card hh" style="margin-top:10px"><div><b>Gäste</b><div class="small muted">Weitere Personen ohne Konto</div></div>
+  <span class="pers"><button data-act="attG" data-d="-1" aria-label="Weniger Gäste">−</button><b>${a.g||0}</b><button data-act="attG" data-d="1" aria-label="Mehr Gäste">+</button></span></div>
+  <label class="chk"><input type="checkbox" data-act="openIn"${S.openIn!==false?' checked':''}> Offene zählen als dabei</label>
+  <p style="margin:8px 0"><b>${c==null?'Noch keine Angaben.':`Es wird für ${c} ${c===1?'Person':'Personen'} gekocht.`}</b>
+  ${meals.length?`<br><span class="small muted">${meals.map(({e,r})=>`${esc(r.title)}: ${pers(e)} Pers.${isAuto(e)?' (automatisch)':' (von Hand eingestellt)'}`).join('<br>')}</span>`:''}</p>
+  ${meals.some(({e})=>e.manual)?`<div class="acts"><button class="btn quiet" data-act="attAuto">Wieder automatisch berechnen</button></div>`:''}`,'Anwesenheit '+fmtDay(parseIso(k))+' Abend');
+}
+function membersSheet(){
+  const me=getMe(), acc=Cloud.account(), accName=acc?.name||'';
+  sheet(`<p class="muted small" style="margin-top:0">Wer regelmäßig mitisst. Tippe „Das bin ich" bei deinem Namen, dann kannst du dich auf diesem Gerät mit einem Tipp an- und abmelden. Kinder ohne eigenes Handy meldet ihr in der Anwesenheit mit an.</p>
+  <div class="card">${S.members.map(m=>`<div class="prow"><span class="n">${esc(m.name)}</span>
+    <button class="btn sm ${m.id===me?'':'quiet'}" data-act="iam" data-id="${m.id}">${m.id===me?'Das bin ich ✓':'Das bin ich'}</button>
+    <button class="x" data-act="memDel" data-id="${m.id}" aria-label="${esc(m.name)} entfernen">×</button></div>`).join('')||'<div class="empty" style="padding:12px">Noch niemand angelegt.</div>'}</div>
+  <form class="addrow" style="grid-template-columns:1fr auto;margin-top:12px" data-form="addMember"><input type="text" id="mn" placeholder="Name, z. B. Anna" aria-label="Name"><button class="btn" type="submit">+</button></form>
+  ${accName&&!S.members.some(m=>m.name===accName)?`<div class="acts"><button class="btn ghost sm" data-act="memSelf">„${esc(accName)}" hinzufügen (dein Microsoft-Name)</button></div>`:''}`,'Familienmitglieder');
+}
+let AT='';
+
 /* ---------- Einkaufsliste berechnen ---------- */
 function shopLines(){
   const to=iso(addDays(NOW,UI.horizon-1)),m=new Map();
   for(const e of S.plan){
     if(e.date<TODAY||e.date>to)continue;
-    const r=rec(e.rid); if(!r)continue; const f=e.persons/r.servings;
+    const r=rec(e.rid); if(!r)continue; const f=pers(e)/r.servings;
     for(const g of r.ing){
       const [a,u]=norm(g.amount==null?null:g.amount*f,g.unit), k=stem(g.name)+'|'+u;
       let l=m.get(k); if(!l){l={key:k,name:g.name,unit:u,amount:null,cat:guess(g.name),from:new Set()};m.set(k,l)}
@@ -197,6 +269,7 @@ function planView(){
   const mon=addDays(NOW,-((NOW.getDay()+6)%7)+UI.week*7), sun=addDays(mon,6);
   let h=`<div class="card hh"><div><b>Standard</b><div class="small muted">Für neue Mahlzeiten vorgewählt</div></div>${stepper('household',S.household)}</div>
   <div class="card hh"><div><b>Ausgewogen essen?</b><div class="small muted">Einschätzung und Vorschläge nach eurem Plan</div></div><button class="btn sm" data-act="balance">Vorschläge</button></div>
+  ${attCard()}
   <div class="weeknav"><button class="arrow" data-act="week" data-d="-1" aria-label="Vorige Woche">‹</button>
   <div style="text-align:center"><h2 style="font-size:1.1rem">${UI.week===0?'Diese Woche':UI.week===1?'Nächste Woche':UI.week===-1?'Letzte Woche':'Woche ab '+fmtDay(mon)}</h2><div class="small muted">${fmtDay(mon)} – ${fmtDay(sun)}</div></div>
   <button class="arrow" data-act="week" data-d="1" aria-label="Nächste Woche">›</button></div><div style="height:12px"></div>`;
@@ -206,10 +279,11 @@ function planView(){
     if(!es.length)h+=`<div class="empty">Noch nichts geplant</div>`;
     es.sort((a,b)=>SLOTS.indexOf(a.slot)-SLOTS.indexOf(b.slot)).forEach(e=>{
       const r=rec(e.rid); if(!r)return;
-      const fl=e.persons>S.household?'<span class="flag">Besuch</span>':e.persons<S.household?'<span class="flag">weniger</span>':'';
-      h+=`<div class="meal"><div class="mt"><span class="slot">${e.slot}</span><button class="name" data-act="open" data-id="${r.id}" data-p="${e.persons}">${esc(r.title)}</button></div>
-      <div>${stepper(e.id,e.persons)}${fl}</div><button class="x" data-act="rmPlan" data-id="${e.id}" aria-label="Entfernen">×</button></div>`;
+      const pe=pers(e),fl=isAuto(e)?'<span class="flag">nach Anmeldung</span>':pe>S.household?'<span class="flag">Besuch</span>':pe<S.household?'<span class="flag">weniger</span>':'';
+      h+=`<div class="meal"><div class="mt"><span class="slot">${e.slot}</span><button class="name" data-act="open" data-id="${r.id}" data-p="${pe}">${esc(r.title)}</button></div>
+      <div>${stepper(e.id,pe)}${fl}</div><button class="x" data-act="rmPlan" data-id="${e.id}" aria-label="Entfernen">×</button></div>`;
     });
+    if(S.members.length)h+=`<button class="att-line" data-act="att" data-id="${k}">Abend: ${esc(attSummary(k))} ›</button>`;
     h+='</section>';
   }
   return h+`<div class="acts"><button class="btn quiet" data-act="tab" data-id="shop">Einkaufsliste ansehen</button></div>`;
@@ -268,7 +342,7 @@ function shopView(){
 }
 
 /* ---------- Verlauf: was wir wann gegessen haben ---------- */
-const past=()=>S.plan.filter(e=>e.date<TODAY).map(e=>({...e,t:rec(e.rid)?.title||e.title||'Gelöschtes Rezept'}));
+const past=()=>S.plan.filter(e=>e.date<TODAY).map(e=>({...e,persons:pers(e),t:rec(e.rid)?.title||e.title||'Gelöschtes Rezept'}));
 function histView(){
   return `<div class="section-h"><h2>Verlauf</h2><span class="seg2">${[[30,'30 Tage'],[90,'90 Tage'],[0,'Alles']].map(([n,l])=>`<button class="${UI.hrange===n?'on':''}" data-act="hrange" data-d="${n}">${l}</button>`).join('')}</span></div>
   <div class="acts" style="margin:0 0 10px"><button class="btn sm" data-act="backfill">+ Mahlzeit nachtragen</button></div>
@@ -650,6 +724,16 @@ document.addEventListener('click',async e=>{
     case 'close':closeSheet();break;
     case 'week':UI.week+=d;render();break;
     case 'hrange':UI.hrange=d;render();break;
+    case 'members':membersSheet();break;
+    case 'iam':setMe(id);membersSheet();render();break;
+    case 'memDel':S.members=S.members.filter(m=>m.id!==id);commit();membersSheet();break;
+    case 'memSelf':{const n=Cloud.account()?.name;if(n){const m={id:uid(),name:n};S.members.push(m);if(!getMe())setMe(m.id);commit();membersSheet()}break}
+    case 'att':attSheet(id);break;
+    case 'meSet':{const me=getMe();if(!me)break;const cur=S.att[akey(id)]?.m?.[me]||'';setAtt(id,me,cur===t.dataset.v?'':t.dataset.v);commit();break}
+    case 'attSet':setAtt(AT,id,t.dataset.v);commit();attSheet(AT);break;
+    case 'attG':{const k=akey(AT),x=S.att[k]||(S.att[k]={m:{},g:0});x.g=Math.max(0,Math.min(20,(x.g||0)+d));if(!Object.keys(x.m).length&&!x.g)delete S.att[k];commit();attSheet(AT);break}
+    case 'openIn':S.openIn=!(S.openIn!==false);commit();attSheet(AT);break;
+    case 'attAuto':S.plan.forEach(e=>{if(e.date===AT&&e.slot==='Abend')delete e.manual});commit();attSheet(AT);break;
     case 'fromPantry':cookSheet();break;
     case 'cookMax':COOK.max=d;paintCook();break;
     case 'cookNet':searchSheet();if($('#sq'))$('#sq').value='ein alltagstaugliches Gericht, das gut zu meinem Vorrat passt';break;
@@ -660,7 +744,7 @@ document.addEventListener('click',async e=>{
     case 'again':planSheet(TODAY,id,+t.dataset.p||S.household);break;
     case 'pers':
       if(id==='household'){S.household=Math.min(20,Math.max(1,S.household+d))}
-      else{const p=S.plan.find(x=>x.id===id);if(p)p.persons=Math.min(30,Math.max(1,p.persons+d))}
+      else{const p=S.plan.find(x=>x.id===id);if(p){p.persons=Math.min(30,Math.max(1,pers(p)+d));p.manual=true}}
       commit();break;
     case 'rmPlan':S.plan=S.plan.filter(x=>x.id!==id);commit();break;
     case 'addPlan':if(!S.recipes.length){toast('Lege zuerst ein Rezept an.');UI.tab='rec';render();break}planSheet(id,null);break;
@@ -674,7 +758,7 @@ document.addEventListener('click',async e=>{
     case 'savePlan':{
       if(!PS.rid||!rec(PS.rid)){toast('Bitte ein Gericht wählen.');break}
       if(!/^\d{4}-\d{2}-\d{2}$/.test($('#pd').value)){toast('Bitte einen Tag wählen.');break}
-      S.plan.push({id:uid(),date:$('#pd').value,slot:$('#ps').value,rid:PS.rid,title:rec(PS.rid)?.title||'',persons:+$('#pp').textContent});
+      S.plan.push({id:uid(),date:$('#pd').value,slot:$('#ps').value,rid:PS.rid,title:rec(PS.rid)?.title||'',persons:+$('#pp').textContent,manual:+$('#pp').textContent!==S.household});
       const nd=S.plan[S.plan.length-1].date;
       closeSheet();
       if(nd<TODAY)toast('Im Verlauf nachgetragen.');
@@ -728,6 +812,7 @@ document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;
 document.addEventListener('submit',e=>{
   const f=e.target.dataset.form; if(!f)return; e.preventDefault();
   if(f==='addPantry'){const n=$('#pn').value.trim();if(!n)return;S.pantry.push({id:uid(),name:n,loc:$('#pl').value,level:2});commit();$('#pn').focus()}
+  if(f==='addMember'){const n=$('#mn').value.trim();if(!n)return;const m={id:uid(),name:n};S.members.push(m);if(!getMe()&&S.members.length===1)setMe(m.id);commit();membersSheet();$('#mn').focus()}
   if(f==='addExtra'){const g=parseLine($('#xn').value);if(!g)return;S.extras.push({id:uid(),name:g.name,amount:g.amount,unit:g.unit,cat:guess(g.name)});commit();$('#xn').focus()}
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet();if(e.key==='Enter'&&e.target.id==='sq')doSearch()});
