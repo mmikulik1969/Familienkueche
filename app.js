@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-29 h';
+const APP_VERSION='2026-10-29 i';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -268,6 +268,7 @@ function shopView(){
 const past=()=>S.plan.filter(e=>e.date<TODAY).map(e=>({...e,t:rec(e.rid)?.title||e.title||'Gelöschtes Rezept'}));
 function histView(){
   return `<div class="section-h"><h2>Verlauf</h2><span class="seg2">${[[30,'30 Tage'],[90,'90 Tage'],[0,'Alles']].map(([n,l])=>`<button class="${UI.hrange===n?'on':''}" data-act="hrange" data-d="${n}">${l}</button>`).join('')}</span></div>
+  <div class="acts" style="margin:0 0 10px"><button class="btn sm" data-act="backfill">+ Mahlzeit nachtragen</button></div>
   <input type="search" id="hq" placeholder="Gericht suchen" value="${esc(UI.hq)}" aria-label="Im Verlauf suchen">
   <div id="hlist">${histList()}</div>`;
 }
@@ -328,14 +329,13 @@ function detailSheet(){
   sheet(body,r.title);
 }
 function planSheet(date,rid,persons){
-  const days=Array.from({length:21},(_,i)=>addDays(NOW,i));
   const rs=[...S.recipes].sort((a,b)=>{const x=covOf(a),y=covOf(b);return y.h/y.t-x.h/x.t});
   sheet(`<label class="f" for="pr">Gericht</label><select id="pr">${rs.map(r=>{const c=covOf(r);return `<option value="${r.id}"${r.id===rid?' selected':''}>${esc(r.title)} · ${c.h}/${c.t} im Vorrat</option>`}).join('')}</select>
-  <label class="f" for="pd">Tag</label><select id="pd">${days.map(d=>`<option value="${iso(d)}"${iso(d)===date?' selected':''}>${fmtDay(d)}${iso(d)===TODAY?' (heute)':''}</option>`).join('')}</select>
+  <label class="f" for="pd">Tag (auch früher möglich, zum Nachtragen)</label><input type="date" id="pd" value="${esc(date)}">
   <label class="f" for="ps">Mahlzeit</label><select id="ps">${SLOTS.map(s=>`<option${s==='Abend'?' selected':''}>${s}</option>`).join('')}</select>
   <label class="f">Personen</label><span class="step"><button data-act="step" data-d="-1" aria-label="Weniger">−</button><output id="pp">${persons||S.household}</output><button data-act="step" data-d="1" aria-label="Mehr">+</button></span>
-  <div class="hint">Die Rezeptliste ist nach Zutaten im Vorrat sortiert. Mit mehr oder weniger Personen werden die Mengen automatisch umgerechnet.</div>
-  <div class="acts"><button class="btn" data-act="savePlan">Hinzufügen</button></div>`,'Gericht planen');
+  <div class="hint">Die Rezeptliste ist nach Zutaten im Vorrat sortiert. Mahlzeiten an vergangenen Tagen erscheinen im Verlauf.</div>
+  <div class="acts"><button class="btn" data-act="savePlan">Hinzufügen</button></div>`,'Gericht planen oder nachtragen');
 }
 function cookedSheet(){
   const r=rec(C.rid), items=[];
@@ -573,6 +573,7 @@ document.addEventListener('click',async e=>{
     case 'close':closeSheet();break;
     case 'week':UI.week+=d;render();break;
     case 'hrange':UI.hrange=d;render();break;
+    case 'backfill':if(!S.recipes.length){toast('Lege zuerst ein Rezept an.');break}planSheet(iso(addDays(NOW,-1)),null);break;
     case 'again':planSheet(TODAY,id,+t.dataset.p||S.household);break;
     case 'pers':
       if(id==='household'){S.household=Math.min(20,Math.max(1,S.household+d))}
@@ -585,9 +586,14 @@ document.addEventListener('click',async e=>{
     case 'zoom':t.classList.toggle('big');break;
     case 'planThis':{const r=D.rid,p=D.persons;planSheet(TODAY,r,p);D=null;break}
     case 'step':{const o=$('#pp');o.textContent=Math.min(30,Math.max(1,(+o.textContent)+d));break}
-    case 'savePlan':
+    case 'savePlan':{
+      if(!/^\d{4}-\d{2}-\d{2}$/.test($('#pd').value)){toast('Bitte einen Tag wählen.');break}
       S.plan.push({id:uid(),date:$('#pd').value,slot:$('#ps').value,rid:$('#pr').value,title:rec($('#pr').value)?.title||'',persons:+$('#pp').textContent});
-      closeSheet();UI.tab='plan';UI.week=Math.floor((parseIso(S.plan[S.plan.length-1].date)-addDays(NOW,-((NOW.getDay()+6)%7)))/(7*864e5));commit();toast('Eingeplant.');break;
+      const nd=S.plan[S.plan.length-1].date;
+      closeSheet();
+      if(nd<TODAY)toast('Im Verlauf nachgetragen.');
+      else{UI.tab='plan';UI.week=Math.floor((parseIso(nd)-addDays(NOW,-((NOW.getDay()+6)%7)))/(7*864e5));toast('Eingeplant.')}
+      commit();break}
     case 'cooked':C={rid:D.rid,ch:{}};cookedSheet();break;
     case 'cl':C.ch[id]=d;cookedSheet();break;
     case 'applyCooked':{for(const [pid,v] of Object.entries(C.ch)){const p=S.pantry.find(x=>x.id===pid);if(p)p.level=v}closeSheet();commit();toast('Vorrat angepasst.');break}
