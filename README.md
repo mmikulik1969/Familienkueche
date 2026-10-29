@@ -16,6 +16,7 @@ Adresse: https://mmikulik1969.github.io/Familienkueche/
 | `vendor/msal-browser.min.js` | Microsoft-Anmeldebibliothek (MSAL 3.28.1, MIT-Lizenz), mitgeliefert statt von einem Fremdserver geladen |
 | `sw.js`, `manifest.webmanifest` | Installierbar auf dem Startbildschirm, offline mit zuletzt geladenem Stand |
 
+Der Reiter „Verlauf" zeigt vergangene Mahlzeiten aus dem Plan (mit Suche, Zeitraum, Häufigkeit und „Länger nicht gekocht").
 Es gibt keinen eigenen Server. Die Daten liegen in OneDrive im Ordner `Familienkueche`
 (`daten.json` und `foto-*.jpg`).
 

@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-27 g';
+const APP_VERSION='2026-10-29 h';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -65,7 +65,7 @@ function normalize(d){
   return s;
 }
 let S=emptyState();
-const UI={tab:'plan',week:0,q:'',tag:'',horizon:7};
+const UI={tab:'plan',week:0,q:'',tag:'',horizon:7,hrange:30,hq:''};
 let D=null,C=null,PEND=[],AFTER=null,FOUND=[];
 const rec=id=>S.recipes.find(r=>r.id===id);
 const findPantry=name=>{const k=stem(name);
@@ -181,13 +181,14 @@ const ICON={
   plan:'<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
   rec:'<svg viewBox="0 0 24 24"><path d="M5 4.5h10.5A3.5 3.5 0 0 1 19 8v11.5H8.5A3.5 3.5 0 0 1 5 16z"/><path d="M5 16a3.5 3.5 0 0 1 3.5-3.5H19"/></svg>',
   pan:'<svg viewBox="0 0 24 24"><path d="M4 9h16v10.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19.5z"/><path d="M3 4.5h18V9H3zM10 13h4"/></svg>',
-  shop:'<svg viewBox="0 0 24 24"><path d="M3.5 4h2.2l2.2 11h10l2-8H7"/><circle cx="9.5" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/></svg>'
+  shop:'<svg viewBox="0 0 24 24"><path d="M3.5 4h2.2l2.2 11h10l2-8H7"/><circle cx="9.5" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/></svg>',
+  hist:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>'
 };
 function render(){
   const n=openCount();
-  $('#tabs').innerHTML=[['plan','Plan'],['rec','Rezepte'],['pan','Vorrat'],['shop','Einkauf']].map(([k,t])=>
+  $('#tabs').innerHTML=[['plan','Plan'],['rec','Rezepte'],['pan','Vorrat'],['shop','Einkauf'],['hist','Verlauf']].map(([k,t])=>
     `<button data-act="tab" data-id="${k}" class="${UI.tab===k?'on':''}" aria-label="${t}">${ICON[k]}<span>${t}</span>${k==='shop'&&n?`<span class="badge">${n}</span>`:''}</button>`).join('');
-  $('#app').innerHTML=({plan:planView,rec:recView,pan:panView,shop:shopView})[UI.tab]();
+  $('#app').innerHTML=({plan:planView,rec:recView,pan:panView,shop:shopView,hist:histView})[UI.tab]();
 }
 function stepper(id,v){return `<span class="pers"><button data-act="pers" data-id="${id}" data-d="-1" aria-label="Eine Person weniger">−</button><b>${v}</b>Pers.<button data-act="pers" data-id="${id}" data-d="1" aria-label="Eine Person mehr">+</button></span>`}
 
@@ -260,6 +261,41 @@ function shopView(){
   }
   if(have.length)h+=`<details class="card cov-d"><summary>Schon im Vorrat (${have.length})</summary><ul>${have.map(l=>`<li>${esc(l.name)} ${fmtAmt(l.amount,l.unit)}</li>`).join('')}</ul></details>`;
   if(checked)h+=`<div class="finish"><button class="btn" data-act="finish">${checked} abgehakt: In den Vorrat übernehmen</button></div>`;
+  return h;
+}
+
+/* ---------- Verlauf: was wir wann gegessen haben ---------- */
+const past=()=>S.plan.filter(e=>e.date<TODAY).map(e=>({...e,t:rec(e.rid)?.title||e.title||'Gelöschtes Rezept'}));
+function histView(){
+  return `<div class="section-h"><h2>Verlauf</h2><span class="seg2">${[[30,'30 Tage'],[90,'90 Tage'],[0,'Alles']].map(([n,l])=>`<button class="${UI.hrange===n?'on':''}" data-act="hrange" data-d="${n}">${l}</button>`).join('')}</span></div>
+  <input type="search" id="hq" placeholder="Gericht suchen" value="${esc(UI.hq)}" aria-label="Im Verlauf suchen">
+  <div id="hlist">${histList()}</div>`;
+}
+function histList(){
+  const from=UI.hrange?iso(addDays(NOW,-UI.hrange)):'0000-00-00', q=UI.hq.trim().toLowerCase();
+  const all=past();
+  const list=all.filter(e=>e.date>=from&&(!q||e.t.toLowerCase().includes(q)))
+    .sort((a,b)=>b.date.localeCompare(a.date)||SLOTS.indexOf(b.slot)-SLOTS.indexOf(a.slot));
+  if(!all.length)return `<div class="empty">Noch nichts im Verlauf. Geplante Mahlzeiten erscheinen hier, sobald ihr Tag vorbei ist.</div>`;
+  const cnt=new Map(); list.forEach(e=>cnt.set(e.t,(cnt.get(e.t)||0)+1));
+  const top=[...cnt].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).filter(x=>x[1]>1).slice(0,5);
+  let h=`<div class="card hh" style="display:block"><b>${list.length} Mahlzeiten</b> · ${cnt.size} verschiedene Gerichte
+    ${top.length?`<div class="small muted" style="margin-top:4px">Am häufigsten: ${top.map(([t,n])=>`${esc(t)} (${n}×)`).join(', ')}</div>`:''}</div>`;
+  const last=new Map(); all.forEach(e=>{if(e.rid&&(!last.get(e.rid)||e.date>last.get(e.rid)))last.set(e.rid,e.date)});
+  const old=S.recipes.map(r=>({r,d:last.get(r.id)||''})).filter(x=>!x.d||x.d<iso(addDays(NOW,-60))).sort((a,b)=>a.d.localeCompare(b.d)).slice(0,3);
+  if(!q&&old.length)h+=`<div class="card hh" style="display:block"><b>Länger nicht gekocht</b>${old.map(({r,d})=>`<div class="meal" style="margin-top:6px"><div class="mt"><button class="name" data-act="open" data-id="${r.id}">${esc(r.title)}</button>
+    <span class="slot">${d?'zuletzt '+fmtDay(parseIso(d)):'noch nie geplant'}</span></div><button class="btn sm quiet" data-act="again" data-id="${r.id}">Einplanen</button></div>`).join('')}</div>`;
+  if(!list.length)return h+`<div class="empty">Keine Treffer in diesem Zeitraum.</div>`;
+  let month='';
+  for(const e of list){
+    const d=parseIso(e.date), m=d.toLocaleDateString('de-AT',{month:'long',year:'numeric'});
+    if(m!==month){month=m;h+=`<div class="grp" style="margin:14px 0 6px"><h3>${esc(m)}</h3></div>`}
+    const r=rec(e.rid);
+    h+=`<div class="card hist-row"><div class="hd"><b>${fmtDay(d)}</b><span class="slot">${e.slot}</span></div>
+      <div class="mt">${r?`<button class="name" data-act="open" data-id="${r.id}" data-p="${e.persons}">${esc(e.t)}</button>`:`<span class="name">${esc(e.t)}</span>`}<span class="small muted">${e.persons} Pers.</span></div>
+      ${r?`<button class="btn sm quiet" data-act="again" data-id="${r.id}" data-p="${e.persons}">Nochmal</button>`:''}
+      <button class="x" data-act="rmPlan" data-id="${e.id}" aria-label="Aus dem Verlauf entfernen">×</button></div>`;
+  }
   return h;
 }
 
@@ -536,6 +572,8 @@ document.addEventListener('click',async e=>{
     case 'tab':UI.tab=id;closeSheet();render();window.scrollTo(0,0);break;
     case 'close':closeSheet();break;
     case 'week':UI.week+=d;render();break;
+    case 'hrange':UI.hrange=d;render();break;
+    case 'again':planSheet(TODAY,id,+t.dataset.p||S.household);break;
     case 'pers':
       if(id==='household'){S.household=Math.min(20,Math.max(1,S.household+d))}
       else{const p=S.plan.find(x=>x.id===id);if(p)p.persons=Math.min(30,Math.max(1,p.persons+d))}
@@ -548,7 +586,7 @@ document.addEventListener('click',async e=>{
     case 'planThis':{const r=D.rid,p=D.persons;planSheet(TODAY,r,p);D=null;break}
     case 'step':{const o=$('#pp');o.textContent=Math.min(30,Math.max(1,(+o.textContent)+d));break}
     case 'savePlan':
-      S.plan.push({id:uid(),date:$('#pd').value,slot:$('#ps').value,rid:$('#pr').value,persons:+$('#pp').textContent});
+      S.plan.push({id:uid(),date:$('#pd').value,slot:$('#ps').value,rid:$('#pr').value,title:rec($('#pr').value)?.title||'',persons:+$('#pp').textContent});
       closeSheet();UI.tab='plan';UI.week=Math.floor((parseIso(S.plan[S.plan.length-1].date)-addDays(NOW,-((NOW.getDay()+6)%7)))/(7*864e5));commit();toast('Eingeplant.');break;
     case 'cooked':C={rid:D.rid,ch:{}};cookedSheet();break;
     case 'cl':C.ch[id]=d;cookedSheet();break;
@@ -579,7 +617,7 @@ document.addEventListener('click',async e=>{
       const r={id:id||uid(),title,source:$('#rs').value.trim(),servings:Math.max(1,+$('#rv').value||4),tags:$('#rg').value.split(',').map(s=>s.trim()).filter(Boolean),ing,
         steps:$('#rz').value.split('\n').map(s=>s.trim()).filter(Boolean),photos:[...document.querySelectorAll('#exph .ph1')].map(el=>({name:el.dataset.name}))};
       storeRecipe(r,[...$('#newph').files,...($('#keepph')?.checked?PEND:[])],t);break}
-    case 'delRecipe':(rec(id)?.photos||[]).forEach(p=>Cloud.delFile(p.name));S.recipes=S.recipes.filter(x=>x.id!==id);S.plan=S.plan.filter(x=>x.rid!==id);closeSheet();commit();toast('Rezept gelöscht.');break;
+    case 'delRecipe':(rec(id)?.photos||[]).forEach(p=>Cloud.delFile(p.name));{const t=rec(id)?.title;S.recipes=S.recipes.filter(x=>x.id!==id);S.plan=S.plan.filter(x=>x.rid!==id||x.date<TODAY);S.plan.forEach(x=>{if(x.rid===id){x.title=x.title||t;x.rid=''}})}closeSheet();commit();toast('Rezept gelöscht. Frühere Mahlzeiten bleiben im Verlauf.');break;
     case 'lvl':{const p=S.pantry.find(x=>x.id===id);if(p){p.level=d;commit()}break}
     case 'rmPantry':S.pantry=S.pantry.filter(x=>x.id!==id);commit();break;
     case 'hor':UI.horizon=d;render();break;
@@ -594,7 +632,7 @@ document.addEventListener('click',async e=>{
       S.checked={};commit();toast(done.length+' Artikel im Vorrat.');break}
   }
 });
-document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;$('#rlist').innerHTML=recList()}});
+document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;$('#rlist').innerHTML=recList()}if(e.target.id==='hq'){UI.hq=e.target.value;$('#hlist').innerHTML=histList()}});
 document.addEventListener('submit',e=>{
   const f=e.target.dataset.form; if(!f)return; e.preventDefault();
   if(f==='addPantry'){const n=$('#pn').value.trim();if(!n)return;S.pantry.push({id:uid(),name:n,loc:$('#pl').value,level:2});commit();$('#pn').focus()}
