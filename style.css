@@ -181,3 +181,7 @@ img{max-width:100%}
 .pick-row .ps{grid-column:1;font-size:.78rem;color:var(--muted)}
 .pick-row .pc{grid-column:2;grid-row:1/3;color:var(--accent);font-weight:700;font-size:1.1rem}
 .pick-row.on{background:var(--tint)}
+
+a.btn{text-decoration:none}
+.share-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.share-btns .btn{flex:1 1 40%}

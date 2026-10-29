@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-29 j';
+const APP_VERSION='2026-10-29 k';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -52,6 +52,7 @@ function fmtAmt(a,u){
   if(a==null)return '';
   if(u==='g'&&a>=1000){a/=1000;u='kg'} else if(u==='ml'&&a>=1000){a/=1000;u='l'}
   if(u==='kg'||u==='l'){return String(Math.round(a*10)/10).replace('.',',')+' '+u}
+  if(u==='Zehe'&&a>1)u='Zehen';
   return fmtNum(a)+(u?' '+u:'');
 }
 
@@ -218,6 +219,7 @@ function covOf(r){const t=r.ing.length,h=r.ing.filter(g=>{const p=findPantry(g.n
 function recView(){
   const tags=[...new Set(S.recipes.flatMap(r=>r.tags))].sort();
   return `<div class="section-h"><h2>Rezepte (${S.recipes.length})</h2><button class="btn sm" data-act="newRecipe">+ Rezept</button></div>
+  <div class="acts" style="margin:0 0 10px"><button class="btn sm quiet" data-act="fromPantry">Was kochen wir? Aus dem Vorrat</button></div>
   <input type="search" id="q" placeholder="Rezept oder Zutat suchen" value="${esc(UI.q)}" aria-label="Suchen">
   <div class="chips">${tags.map(t=>`<button class="chip${UI.tag===t?' on':''}" data-act="tag" data-id="${esc(t)}">${esc(t)}</button>`).join('')}</div>
   <div id="rlist">${recList()}</div>`;
@@ -251,6 +253,7 @@ function shopView(){
   const checked=need.filter(l=>S.checked[l.key]).length;
   let h=`<div class="section-h"><h2>Einkauf</h2><span class="seg2">${[3,7,14].map(n=>`<button class="${UI.horizon===n?'on':''}" data-act="hor" data-d="${n}">${n} Tage</button>`).join('')}</span></div>
   <form class="addrow" style="grid-template-columns:1fr auto" data-form="addExtra"><input type="text" id="xn" placeholder="Etwas dazuschreiben, z. B. 2 l Milch" aria-label="Artikel"><button class="btn" type="submit">+</button></form>`;
+  if(need.some(l=>!S.checked[l.key]))h+=`<div class="acts" style="margin:0 0 12px"><button class="btn sm quiet" data-act="shareList">Liste senden (WhatsApp, E-Mail, SMS)</button></div>`;
   if(!need.length)h+=`<div class="empty">Nichts zu kaufen für die nächsten ${UI.horizon} Tage. Plane Gerichte im Plan oder schreibe Artikel dazu.</div>`;
   for(const c of CATS){
     if(!by[c])continue;
@@ -440,6 +443,63 @@ function doImport(){
   closeSheet();UI.tab='rec';commit();toast(n+' Rezepte, '+p+' Vorratsartikel übernommen.');
 }
 
+/* ---------- Vorschlag aus dem Vorrat und Einkaufsliste senden ---------- */
+const ASSUMED=/^(salz|pfeffer|wasser)\b/i; // gilt immer als vorhanden
+const COOK={max:2};
+function pantryScore(r){
+  const miss=[],low=[];
+  for(const g of r.ing){
+    if(ASSUMED.test(g.name.trim()))continue;
+    const p=findPantry(g.name);
+    if(!p||p.level===0)miss.push(g.name); else if(p.level===1)low.push(g.name);
+  }
+  return {miss,low};
+}
+function cookSheet(){
+  if(!S.recipes.length){toast('Lege zuerst ein Rezept an.');return}
+  sheet(`<p class="muted small" style="margin-top:0">Gerichte aus eurer Sammlung, die zu eurem Vorrat passen. Salz, Pfeffer und Wasser zählen als vorhanden.</p>
+  <div id="cookfilter" class="seg2" style="margin:0 0 10px"></div><div id="cooklist"></div>
+  <div class="acts"><button class="btn ghost" data-act="cookNet">Neue Ideen aus dem Netz</button></div>`,'Aus dem Vorrat kochen');
+  paintCook();
+}
+function paintCook(){
+  $('#cookfilter').innerHTML=[[0,'Alles da'],[2,'Bis 2 fehlen'],[99,'Alle']].map(([n,l])=>`<button class="${COOK.max===n?'on':''}" data-act="cookMax" data-d="${n}">${l}</button>`).join('');
+  const sc=S.recipes.map(r=>({r,...pantryScore(r)})).filter(x=>x.miss.length<=COOK.max)
+    .sort((a,b)=>a.miss.length-b.miss.length||a.low.length-b.low.length||a.r.title.localeCompare(b.r.title,'de')).slice(0,10);
+  $('#cooklist').innerHTML=sc.length?sc.map(({r,miss,low})=>{
+    const st=!miss.length&&!low.length?'<span class="pill good">Alles da</span>':
+      (miss.length?`<span class="pill bad">Es fehlen: ${esc(miss.slice(0,4).join(', '))}${miss.length>4?' …':''}</span>`:'')+(low.length?` <span class="pill warm">Knapp: ${esc(low.slice(0,3).join(', '))}</span>`:'');
+    return `<div class="card rcard" style="cursor:default"><h3>${esc(r.title)}</h3><div class="meta" style="margin:4px 0">${st}</div>
+      <div class="acts" style="margin-top:8px"><button class="btn sm" data-act="planOwn" data-id="${r.id}">Einplanen</button><button class="btn sm quiet" data-act="open" data-id="${r.id}">Ansehen</button></div></div>`}).join('')
+    :`<div class="empty">${S.pantry.length?'Kein Gericht passt so genau. Probiere „Bis 2 fehlen" oder „Alle".':'Der Vorrat ist noch leer. Trage ihn unter „Vorrat" ein, dann kann ich passende Gerichte finden.'}</div>`;
+}
+function shopText(){
+  const open=shopLines().need.filter(l=>!S.checked[l.key]);
+  if(!open.length)return '';
+  const by={}; open.forEach(l=>(by[l.cat]||(by[l.cat]=[])).push(l));
+  let t=`Einkaufsliste ${fmtDay(NOW)} – ${fmtDay(addDays(NOW,UI.horizon-1))}\n`;
+  for(const c of CATS){
+    if(!by[c])continue;
+    t+=`\n${c}\n`+by[c].sort((x,y)=>x.name.localeCompare(y.name,'de')).map(l=>`• ${[fmtAmt(l.amount,l.unit),l.name].filter(Boolean).join(' ')}`).join('\n')+'\n';
+  }
+  return t.trim();
+}
+function setShareLinks(){
+  const t=encodeURIComponent($('#stxt').value);
+  $('#sh-wa').href='https://wa.me/?text='+t;
+  $('#sh-mail').href='mailto:?subject='+encodeURIComponent('Einkaufsliste')+'&body='+t;
+  $('#sh-sms').href='sms:?&body='+t;
+}
+function shareSheet(){
+  const t=shopText(); if(!t){toast('Es gibt nichts zu senden.');return}
+  sheet(`<p class="muted small" style="margin-top:0">Nur Artikel, die noch nicht abgehakt sind. Du kannst den Text vor dem Senden ändern.</p>
+  <textarea id="stxt" style="min-height:230px">${esc(t)}</textarea>
+  <div class="share-btns">${navigator.share?'<button class="btn" data-act="nativeShare">Teilen …</button>':''}
+  <a class="btn" id="sh-wa" target="_blank" rel="noopener">WhatsApp</a><a class="btn quiet" id="sh-mail">E-Mail</a><a class="btn quiet" id="sh-sms">SMS</a>
+  <button class="btn ghost" data-act="copyList">Kopieren</button></div>`,'Einkaufsliste senden');
+  setShareLinks();
+}
+
 /* ---------- Claude: Foto auslesen, Rezepte im Netz suchen, Vorschläge ---------- */
 const prefill=r=>({title:r.title||'',source:r.source||'',servings:Math.max(1,+r.servings||4),tags:(r.tags||[]).join(', '),ing:(r.ingredients||[]).join('\n'),steps:(r.steps||[]).join('\n'),photos:[]});
 function aiError(e){
@@ -590,6 +650,12 @@ document.addEventListener('click',async e=>{
     case 'close':closeSheet();break;
     case 'week':UI.week+=d;render();break;
     case 'hrange':UI.hrange=d;render();break;
+    case 'fromPantry':cookSheet();break;
+    case 'cookMax':COOK.max=d;paintCook();break;
+    case 'cookNet':searchSheet();if($('#sq'))$('#sq').value='ein alltagstaugliches Gericht, das gut zu meinem Vorrat passt';break;
+    case 'shareList':shareSheet();break;
+    case 'copyList':copyText($('#stxt'),'Liste kopiert.');break;
+    case 'nativeShare':navigator.share({title:'Einkaufsliste',text:$('#stxt').value}).catch(()=>{});break;
     case 'backfill':if(!S.recipes.length){toast('Lege zuerst ein Rezept an.');break}planSheet(iso(addDays(NOW,-1)),null);break;
     case 'again':planSheet(TODAY,id,+t.dataset.p||S.household);break;
     case 'pers':
@@ -658,7 +724,7 @@ document.addEventListener('click',async e=>{
       S.checked={};commit();toast(done.length+' Artikel im Vorrat.');break}
   }
 });
-document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;$('#rlist').innerHTML=recList()}if(e.target.id==='hq'){UI.hq=e.target.value;$('#hlist').innerHTML=histList()}if(e.target.id==='prq'){PS.q=e.target.value;paintPick()}});
+document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;$('#rlist').innerHTML=recList()}if(e.target.id==='hq'){UI.hq=e.target.value;$('#hlist').innerHTML=histList()}if(e.target.id==='prq'){PS.q=e.target.value;paintPick()}if(e.target.id==='stxt')setShareLinks()});
 document.addEventListener('submit',e=>{
   const f=e.target.dataset.form; if(!f)return; e.preventDefault();
   if(f==='addPantry'){const n=$('#pn').value.trim();if(!n)return;S.pantry.push({id:uid(),name:n,loc:$('#pl').value,level:2});commit();$('#pn').focus()}
