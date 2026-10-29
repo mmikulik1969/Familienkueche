@@ -173,3 +173,11 @@ img{max-width:100%}
 .hist-row .mt{flex:1;min-width:0;display:flex;flex-direction:column}
 .hist-row .name{font-weight:600;text-align:left;overflow-wrap:anywhere}
 .hist-row .slot{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+
+.pick{max-height:34vh;overflow-y:auto;border:1.5px solid var(--line);border-radius:10px;background:var(--surface)}
+.pick-row{display:grid;grid-template-columns:1fr auto;gap:0 8px;width:100%;text-align:left;padding:10px 12px;border-top:1px solid var(--line);min-height:52px;align-items:center}
+.pick-row:first-child{border-top:0}
+.pick-row .pt{font-weight:600;overflow-wrap:anywhere}
+.pick-row .ps{grid-column:1;font-size:.78rem;color:var(--muted)}
+.pick-row .pc{grid-column:2;grid-row:1/3;color:var(--accent);font-weight:700;font-size:1.1rem}
+.pick-row.on{background:var(--tint)}

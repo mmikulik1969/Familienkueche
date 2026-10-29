@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-29 i';
+const APP_VERSION='2026-10-29 j';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -329,13 +329,30 @@ function detailSheet(){
   sheet(body,r.title);
 }
 function planSheet(date,rid,persons){
-  const rs=[...S.recipes].sort((a,b)=>{const x=covOf(a),y=covOf(b);return y.h/y.t-x.h/x.t});
-  sheet(`<label class="f" for="pr">Gericht</label><select id="pr">${rs.map(r=>{const c=covOf(r);return `<option value="${r.id}"${r.id===rid?' selected':''}>${esc(r.title)} · ${c.h}/${c.t} im Vorrat</option>`}).join('')}</select>
+  PS={rid:rid&&rec(rid)?rid:'',sort:'az',q:''};
+  sheet(`<label class="f" for="prq" style="margin-top:0">Gericht</label>
+  <input type="search" id="prq" placeholder="Gericht suchen" autocomplete="off" aria-label="Gericht suchen">
+  <div id="prsort" class="seg2" style="margin:8px 0"></div>
+  <div id="prlist" class="pick" role="listbox" aria-label="Gerichte"></div>
   <label class="f" for="pd">Tag (auch früher möglich, zum Nachtragen)</label><input type="date" id="pd" value="${esc(date)}">
   <label class="f" for="ps">Mahlzeit</label><select id="ps">${SLOTS.map(s=>`<option${s==='Abend'?' selected':''}>${s}</option>`).join('')}</select>
   <label class="f">Personen</label><span class="step"><button data-act="step" data-d="-1" aria-label="Weniger">−</button><output id="pp">${persons||S.household}</output><button data-act="step" data-d="1" aria-label="Mehr">+</button></span>
-  <div class="hint">Die Rezeptliste ist nach Zutaten im Vorrat sortiert. Mahlzeiten an vergangenen Tagen erscheinen im Verlauf.</div>
+  <div class="hint">Mahlzeiten an vergangenen Tagen erscheinen im Verlauf.</div>
   <div class="acts"><button class="btn" data-act="savePlan">Hinzufügen</button></div>`,'Gericht planen oder nachtragen');
+  paintPick(true);
+}
+let PS={rid:'',sort:'az',q:''};
+function paintPick(scroll){
+  const q=PS.q.trim().toLowerCase();
+  let rs=S.recipes.filter(r=>!q||r.title.toLowerCase().includes(q)||r.tags.some(t=>t.toLowerCase().includes(q))||r.ing.some(g=>g.name.toLowerCase().includes(q)));
+  const az=(a,b)=>a.title.localeCompare(b.title,'de');
+  rs=PS.sort==='vorrat'?rs.map(r=>({r,c:covOf(r)})).sort((x,y)=>y.c.h/y.c.t-x.c.h/x.c.t||az(x.r,y.r)).map(x=>x.r):rs.sort(az);
+  $('#prsort').innerHTML=[['az','A–Z'],['vorrat','Passt zum Vorrat']].map(([k,l])=>`<button class="${PS.sort===k?'on':''}" data-act="pickSort" data-id="${k}">${l}</button>`).join('');
+  $('#prlist').innerHTML=rs.length?rs.map(r=>{const c=covOf(r);
+    return `<button class="pick-row${r.id===PS.rid?' on':''}" role="option" aria-selected="${r.id===PS.rid}" data-act="pickR" data-id="${r.id}"><span class="pt">${esc(r.title)}</span>
+    <span class="ps">${c.h}/${c.t} Zutaten im Vorrat${r.tags.length?' · '+esc(r.tags.slice(0,2).join(', ')):''}</span><span class="pc" aria-hidden="true">${r.id===PS.rid?'✓':''}</span></button>`}).join('')
+    :'<div class="empty" style="padding:12px">Kein Gericht gefunden.</div>';
+  if(scroll)$('#prlist .on')?.scrollIntoView({block:'nearest'});
 }
 function cookedSheet(){
   const r=rec(C.rid), items=[];
@@ -586,9 +603,12 @@ document.addEventListener('click',async e=>{
     case 'zoom':t.classList.toggle('big');break;
     case 'planThis':{const r=D.rid,p=D.persons;planSheet(TODAY,r,p);D=null;break}
     case 'step':{const o=$('#pp');o.textContent=Math.min(30,Math.max(1,(+o.textContent)+d));break}
+    case 'pickR':PS.rid=id;paintPick();break;
+    case 'pickSort':PS.sort=id;paintPick();break;
     case 'savePlan':{
+      if(!PS.rid||!rec(PS.rid)){toast('Bitte ein Gericht wählen.');break}
       if(!/^\d{4}-\d{2}-\d{2}$/.test($('#pd').value)){toast('Bitte einen Tag wählen.');break}
-      S.plan.push({id:uid(),date:$('#pd').value,slot:$('#ps').value,rid:$('#pr').value,title:rec($('#pr').value)?.title||'',persons:+$('#pp').textContent});
+      S.plan.push({id:uid(),date:$('#pd').value,slot:$('#ps').value,rid:PS.rid,title:rec(PS.rid)?.title||'',persons:+$('#pp').textContent});
       const nd=S.plan[S.plan.length-1].date;
       closeSheet();
       if(nd<TODAY)toast('Im Verlauf nachgetragen.');
@@ -638,7 +658,7 @@ document.addEventListener('click',async e=>{
       S.checked={};commit();toast(done.length+' Artikel im Vorrat.');break}
   }
 });
-document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;$('#rlist').innerHTML=recList()}if(e.target.id==='hq'){UI.hq=e.target.value;$('#hlist').innerHTML=histList()}});
+document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;$('#rlist').innerHTML=recList()}if(e.target.id==='hq'){UI.hq=e.target.value;$('#hlist').innerHTML=histList()}if(e.target.id==='prq'){PS.q=e.target.value;paintPick()}});
 document.addEventListener('submit',e=>{
   const f=e.target.dataset.form; if(!f)return; e.preventDefault();
   if(f==='addPantry'){const n=$('#pn').value.trim();if(!n)return;S.pantry.push({id:uid(),name:n,loc:$('#pl').value,level:2});commit();$('#pn').focus()}
