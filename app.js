@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-30 l';
+const APP_VERSION='2026-10-30 m';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -596,6 +596,7 @@ function keySheet(next){
 }
 function addSheet(){
   sheet(`<div class="choice"><button class="btn" data-act="aiPhoto">Foto aus dem Kochbuch auslesen</button>
+  <button class="btn" data-act="aiUrl">Rezept von einer Webseite (Link)</button>
   <button class="btn quiet" data-act="aiSearch">Im Netz nach Rezepten suchen</button>
   <button class="btn ghost" data-act="manual">Von Hand eingeben</button></div>`,'Rezept hinzufügen');
 }
@@ -603,6 +604,38 @@ function photoSheet(){
   if(!AI.has())return keySheet('aiPhoto');
   sheet(`<p class="muted small" style="margin-top:0">Fotografiere die Rezeptseite. Geht das Rezept über zwei Seiten, wähle bis zu 4 Fotos.</p>
   <input type="file" id="files" accept="image/*" multiple aria-label="Fotos wählen"><div class="acts"><button class="btn" id="go" data-act="doPhoto">Rezept auslesen</button></div>`,'Foto auslesen');
+}
+function urlSheet(){
+  if(!AI.has())return keySheet('aiUrl');
+  sheet(`<label class="f" for="url" style="margin-top:0">Link zum Rezept</label>
+  <input type="text" id="url" inputmode="url" placeholder="https://…" autocomplete="off" autocapitalize="off" aria-label="Link zum Rezept">
+  <div class="acts"><button class="btn" id="go" data-act="doUrl">Rezept holen</button></div>
+  <details class="card cov-d" style="margin-top:16px"><summary>Klappt nicht? Rezepttext einfügen</summary>
+  <p class="small muted">Manche Seiten lassen sich nicht abrufen. Dann den Text der Seite markieren, kopieren und hier einfügen.</p>
+  <textarea id="txt" style="min-height:160px" placeholder="Rezepttext hier einfügen …"></textarea>
+  <div class="acts"><button class="btn quiet" id="go2" data-act="doText">Text auslesen</button></div></details>`,'Rezept per Link');
+}
+async function doUrl(){
+  const u=(($('#url').value.match(/https?:\/\/\S+/)||[''])[0]).replace(/[)\].,;]+$/,'');
+  if(!u){toast('Bitte einen Link einfügen. Er beginnt mit http.');return}
+  const dup=S.recipes.find(r=>r.source===u);
+  if(dup){closeSheet();D={rid:dup.id,persons:S.household};detailSheet();toast('Dieses Rezept ist schon gespeichert.');return}
+  const btn=$('#go'); btn.disabled=true; btn.textContent='Holt …';
+  try{
+    const r=await AI.importUrl(u);
+    if(!r.title&&!(r.ingredients||[]).length){btn.disabled=false;btn.textContent='Rezept holen';toast('Auf dieser Seite wurde kein Rezept gefunden. Probiere „Rezepttext einfügen".');return}
+    PEND=[]; recipeForm(prefill(r)); toast('Bitte prüfen, dann speichern.');
+  }catch(e){btn.disabled=false;btn.textContent='Rezept holen';toast(aiError(e))}
+}
+async function doText(){
+  const t=$('#txt').value.trim(); if(t.length<30){toast('Bitte den Rezepttext einfügen.');return}
+  const btn=$('#go2'); btn.disabled=true; btn.textContent='Liest …';
+  try{
+    const r=await AI.readText(t);
+    if(!r.title&&!(r.ingredients||[]).length){btn.disabled=false;btn.textContent='Text auslesen';toast('Im Text wurde kein Rezept erkannt.');return}
+    const u=(($('#url')?.value||'').match(/https?:\/\/\S+/)||[''])[0];
+    PEND=[]; recipeForm(prefill({...r,source:r.source||u})); toast('Bitte prüfen, dann speichern.');
+  }catch(e){btn.disabled=false;btn.textContent='Text auslesen';toast(aiError(e))}
 }
 function searchSheet(){
   if(!AI.has())return keySheet('aiSearch');
@@ -772,6 +805,9 @@ document.addEventListener('click',async e=>{
     case 'manual':PEND=[];recipeForm({title:'',source:'',servings:S.household,tags:'',ing:'',steps:'',photos:[]});break;
     case 'aiPhoto':photoSheet();break;
     case 'aiSearch':searchSheet();break;
+    case 'aiUrl':urlSheet();break;
+    case 'doUrl':doUrl();break;
+    case 'doText':doText();break;
     case 'doPhoto':doPhoto();break;
     case 'doSearch':doSearch();break;
     case 'useRes':{PEND=[];recipeForm(prefill(FOUND[+id]));toast('Bitte prüfen, dann speichern.');break}
@@ -782,7 +818,7 @@ document.addEventListener('click',async e=>{
     case 'saveKey':{const v=($('#akey')?.value||'').trim();
       if(!/^sk-ant-/.test(v)){toast('Das sieht nicht nach einem Schlüssel aus. Er beginnt mit sk-ant-.');break}
       AI.set(v);toast('Schlüssel gespeichert.');const n=AFTER;AFTER=null;closeSheet();
-      if(n==='aiPhoto')photoSheet();else if(n==='aiSearch')searchSheet();else if(n==='balance')balanceSheet();else settingsSheet();break}
+      if(n==='aiPhoto')photoSheet();else if(n==='aiSearch')searchSheet();else if(n==='aiUrl')urlSheet();else if(n==='balance')balanceSheet();else settingsSheet();break}
     case 'delKey':AI.set('');toast('Schlüssel entfernt.');settingsSheet();break;
     case 'testKey':{t.disabled=true;t.textContent='Testet …';try{await AI.test();toast('Der Zugang funktioniert.')}catch(x){toast(aiError(x))}t.disabled=false;t.textContent='Testen';break}
     case 'editRecipe':{const r=rec(D.rid);closeSheet();recipeForm({title:r.title,source:r.source,servings:r.servings,tags:r.tags.join(', '),ing:r.ing.map(lineStr).join('\n'),steps:r.steps.join('\n'),photos:r.photos||[]},r.id);break}
@@ -815,6 +851,6 @@ document.addEventListener('submit',e=>{
   if(f==='addMember'){const n=$('#mn').value.trim();if(!n)return;const m={id:uid(),name:n};S.members.push(m);if(!getMe()&&S.members.length===1)setMe(m.id);commit();membersSheet();$('#mn').focus()}
   if(f==='addExtra'){const g=parseLine($('#xn').value);if(!g)return;S.extras.push({id:uid(),name:g.name,amount:g.amount,unit:g.unit,cat:guess(g.name)});commit();$('#xn').focus()}
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet();if(e.key==='Enter'&&e.target.id==='sq')doSearch()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet();if(e.key==='Enter'&&e.target.id==='sq')doSearch();if(e.key==='Enter'&&e.target.id==='url')doUrl()});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 start();

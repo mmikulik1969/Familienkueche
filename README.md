@@ -33,7 +33,7 @@ Es gibt keinen eigenen Server. Die Daten liegen in OneDrive im Ordner `Familienk
 
 ## Claude-Funktionen (optional)
 
-Foto-Auslesen, Rezeptsuche im Netz und Vorschläge für ausgewogenes Essen laufen über die Claude-Schnittstelle (Modell `claude-opus-5-5`).
+Foto-Auslesen, Rezepte per Link, Rezeptsuche im Netz und Vorschläge für ausgewogenes Essen laufen über die Claude-Schnittstelle (Modell `claude-opus-5-5`).
 Dafür braucht jedes Gerät einmal einen Schlüssel von console.anthropic.com (⋮ → Claude-Zugang). Der Schlüssel liegt nur im
 `localStorage` des Geräts, nicht im Repository und nicht in OneDrive. Die Kosten laufen über das Anthropic-Konto; dort ein Monatslimit setzen.
 Die Websuche muss in der Anthropic Console unter den Datenschutz-Einstellungen der Organisation erlaubt sein.
