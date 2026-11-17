@@ -192,3 +192,7 @@ a.btn{text-decoration:none}
 .att-d{display:flex;flex-direction:column;text-align:left;min-width:0}
 .att-line{display:block;width:100%;text-align:left;margin-top:6px;padding-top:8px;border-top:1px solid var(--line);font-size:.85rem;color:var(--muted)}
 .linkbtn{color:var(--accent);font-weight:600;text-decoration:underline}
+
+.store-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);margin-top:8px}
+ul.deals{margin:8px 0 0;padding-left:1.1rem;font-size:.9rem}
+ul.deals li{margin-bottom:6px;overflow-wrap:anywhere}

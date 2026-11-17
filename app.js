@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026-10-30 m';
+const APP_VERSION='2026-11-17 n';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -327,7 +327,7 @@ function shopView(){
   const checked=need.filter(l=>S.checked[l.key]).length;
   let h=`<div class="section-h"><h2>Einkauf</h2><span class="seg2">${[3,7,14].map(n=>`<button class="${UI.horizon===n?'on':''}" data-act="hor" data-d="${n}">${n} Tage</button>`).join('')}</span></div>
   <form class="addrow" style="grid-template-columns:1fr auto" data-form="addExtra"><input type="text" id="xn" placeholder="Etwas dazuschreiben, z. B. 2 l Milch" aria-label="Artikel"><button class="btn" type="submit">+</button></form>`;
-  if(need.some(l=>!S.checked[l.key]))h+=`<div class="acts" style="margin:0 0 12px"><button class="btn sm quiet" data-act="shareList">Liste senden (WhatsApp, E-Mail, SMS)</button></div>`;
+  if(need.some(l=>!S.checked[l.key]))h+=`<div class="acts" style="margin:0 0 12px"><button class="btn sm quiet" data-act="shareList">Liste senden</button> <button class="btn sm quiet" data-act="stores">Wo einkaufen?</button></div>`;
   if(!need.length)h+=`<div class="empty">Nichts zu kaufen für die nächsten ${UI.horizon} Tage. Plane Gerichte im Plan oder schreibe Artikel dazu.</div>`;
   for(const c of CATS){
     if(!by[c])continue;
@@ -574,6 +574,101 @@ function shareSheet(){
   setShareLinks();
 }
 
+/* ---------- Wo einkaufen? Geschäfte in der Nähe und Wochenangebote ---------- */
+const getHome=()=>{try{return JSON.parse(localStorage.getItem('fk.home'))}catch(e){return null}};
+const setHome=h=>{try{h?localStorage.setItem('fk.home',JSON.stringify(h)):localStorage.removeItem('fk.home')}catch(e){}};
+let STORES=[];
+const CHAIN_RE='spar|billa|hofer|lidl|penny|mpreis|unimarkt';
+function chainOf(t){
+  const s=((t.brand||'')+' '+(t.name||'')).toLowerCase();
+  for(const [k,n] of [['interspar','Interspar'],['eurospar','Eurospar'],['billa plus','Billa Plus'],['billa','Billa'],['hofer','Hofer'],['lidl','Lidl'],['penny','Penny'],['mpreis','MPreis'],['unimarkt','Unimarkt'],['spar','Spar']])
+    if(new RegExp('(^|[^a-zäöüß])'+k+'($|[^a-zäöüß])').test(s))return n; // ganze Wörter: "Spargel" ist kein Spar
+  return '';
+}
+const distM=(a,b,c,d)=>{const R=6371e3,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b),h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const fmtDist=m=>m<1000?Math.round(m/10)*10+' m':(m/1000).toFixed(1).replace('.',',')+' km';
+async function findStores(lat,lon,radius=5000){
+  const q=`[out:json][timeout:25];(nwr["shop"~"supermarket|hypermarket|convenience"]["brand"~"${CHAIN_RE}",i](around:${radius},${lat},${lon});nwr["shop"~"supermarket|hypermarket|convenience"]["name"~"${CHAIN_RE}",i](around:${radius},${lat},${lon}););out center tags 300;`;
+  let last;
+  for(const url of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){
+    try{
+      const ac=new AbortController(),to=setTimeout(()=>ac.abort(),30000);
+      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ac.signal});
+      clearTimeout(to);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json(), seen=new Set(), out=[];
+      for(const e of j.elements||[]){
+        const t=e.tags||{}, c=chainOf(t), la=e.lat??e.center?.lat, lo=e.lon??e.center?.lon;
+        if(!c||la==null||lo==null)continue;
+        const key=c+Math.round(la*2000)+Math.round(lo*2000); if(seen.has(key))continue; seen.add(key);
+        out.push({chain:c,dist:distM(lat,lon,la,lo),lat:la,lon:lo,hours:t.opening_hours||'',
+          addr:[[t['addr:street'],t['addr:housenumber']].filter(Boolean).join(' '),t['addr:city']].filter(Boolean).join(', ')});
+      }
+      return out.sort((a,b)=>a.dist-b.dist);
+    }catch(e){last=e}
+  }
+  throw last||new Error('nicht erreichbar');
+}
+async function geocode(q){
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=at&accept-language=de&q='+encodeURIComponent(q));
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const j=await r.json(); if(!j.length)return null;
+  return {lat:+j[0].lat,lon:+j[0].lon,label:q};
+}
+async function reverseLabel(lat,lon){
+  try{const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=12&accept-language=de&lat=${lat}&lon=${lon}`);const j=await r.json();const a=j.address||{};return a.city||a.town||a.village||a.municipality||''}catch(e){return ''}
+}
+function storesSheet(){
+  const need=shopLines().need.filter(l=>!S.checked[l.key]);
+  sheet(`<p class="muted small" style="margin-top:0">Welche Geschäfte sind in der Nähe, und wo gibt es diese Woche Angebote für eure Liste? Die Karten kommen von OpenStreetMap. Der Standort bleibt auf diesem Gerät gespeichert.</p>
+  <div id="locbox"></div><div id="storelist"></div>
+  <h3 style="margin-top:18px">Wochenangebote für eure Liste</h3>
+  <p class="small muted">Claude sucht im Netz nach Aktionen für ${need.length} Artikel. Das deckt nur Angebote ab und keine Normalpreise. Es dauert etwa eine Minute und kostet wie die anderen Claude-Funktionen etwas.</p>
+  <div class="acts"><button class="btn" id="godeals" data-act="doDeals">Angebote prüfen</button></div><div id="dealres"></div>`,'Wo einkaufen?');
+  paintLoc(); if(getHome())loadStores();
+}
+function paintLoc(){
+  const h=getHome();
+  $('#locbox').innerHTML=h?`<div class="card hh"><div><b>Standort</b><div class="small muted">${esc(h.label||'Aktueller Standort')}</div></div><span style="display:flex;gap:6px"><button class="btn sm quiet" data-act="locChange">Ändern</button></span></div>`
+    :`<div class="acts" style="margin:0 0 10px"><button class="btn" data-act="locGps">Meinen Standort verwenden</button></div>
+      <form class="addrow" style="grid-template-columns:1fr auto" data-form="addLoc"><input type="text" id="lq" placeholder="oder PLZ / Ort, z. B. 1100 Wien" aria-label="PLZ oder Ort"><button class="btn quiet" type="submit">Suchen</button></form>`;
+}
+async function loadStores(){
+  const h=getHome(); if(!h)return;
+  $('#storelist').innerHTML='<p class="muted small">Sucht Geschäfte in der Nähe …</p>';
+  try{STORES=await findStores(h.lat,h.lon);paintStores()}
+  catch(e){$('#storelist').innerHTML=`<p class="small" style="color:var(--bad)">Die Geschäftssuche hat nicht geklappt (${esc(e.message||'Fehler')}). <button class="linkbtn" data-act="storesRetry">Nochmal versuchen</button></p>`}
+}
+function paintStores(){
+  if(!STORES.length){$('#storelist').innerHTML='<div class="empty">Im Umkreis von 5 km wurden keine dieser Ketten gefunden. OpenStreetMap ist nicht überall vollständig.</div>';return}
+  const by=new Map(); STORES.forEach(s=>{(by.get(s.chain)||by.set(s.chain,[]).get(s.chain)).push(s)});
+  const order=[...by].sort((a,b)=>a[1][0].dist-b[1][0].dist);
+  $('#storelist').innerHTML=`<p class="small muted" style="margin:0 0 6px">Nächste Filialen nach Kette. Öffnungszeiten stammen aus OpenStreetMap, ohne Gewähr.</p>`+order.map(([c,l])=>
+    `<div class="card" style="padding:10px 12px;margin-bottom:8px"><b>${esc(c)}</b> <span class="small muted">${l.length} im Umkreis</span>${l.slice(0,2).map(s=>
+      `<div class="store-row"><span><b>${fmtDist(s.dist)}</b>${s.addr?' · '+esc(s.addr):''}${s.hours?`<span class="small muted" style="display:block">${esc(s.hours.slice(0,70))}</span>`:''}</span>
+      <a class="btn sm quiet" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lon}">Karte</a></div>`).join('')}</div>`).join('');
+}
+async function doDeals(){
+  if(!AI.has())return keySheet('deals');
+  const need=shopLines().need.filter(l=>!S.checked[l.key]);
+  if(!need.length){toast('Die Einkaufsliste ist leer.');return}
+  const btn=$('#godeals'); btn.disabled=true; btn.textContent='Sucht Angebote …'; $('#dealres').innerHTML='<p class="muted small">Claude durchsucht die Wochenangebote. Das kann eine Minute dauern.</p>';
+  const near=[...new Set(STORES.map(s=>s.chain))].slice(0,6), chains=near.length?near:['Spar','Billa','Hofer','Lidl','Penny'], h=getHome();
+  try{
+    const res=await AI.deals({items:need.slice(0,25).map(l=>[fmtAmt(l.amount,l.unit),l.name].filter(Boolean).join(' ')),chains,region:(h&&h.label&&h.label!=='Aktueller Standort')?h.label+', Österreich':'Österreich',today:TODAY});
+    paintDeals(res);
+  }catch(e){$('#dealres').innerHTML='';toast(aiError(e))}
+  btn.disabled=false; btn.textContent='Erneut prüfen';
+}
+function paintDeals(res){
+  const ch=(res.chains||[]).map(c=>({chain:String(c.chain||''),deals:(c.deals||[]).filter(d=>d&&d.item)})).filter(c=>c.chain).sort((a,b)=>b.deals.length-a.deals.length);
+  const near=n=>{const k=n.toLowerCase().split(/[ /]/)[0];const s=STORES.find(x=>x.chain.toLowerCase().includes(k));return s?` · nächste Filiale ${fmtDist(s.dist)}`:''};
+  $('#dealres').innerHTML=`${res.recommendation?`<p style="margin:10px 0"><b>${esc(res.recommendation)}</b></p>`:''}
+  ${ch.map(c=>`<div class="card" style="padding:10px 12px;margin-bottom:8px"><b>${esc(c.chain)}</b> <span class="small muted">${c.deals.length} Treffer${near(c.chain)}</span>
+    ${c.deals.length?`<ul class="deals">${c.deals.map(d=>`<li><b>${esc(d.item)}</b>: ${esc(d.product||'')} · <b>${esc(d.price||'')}</b>${d.valid?' · '+esc(d.valid):''}${/^https?:\/\//.test(d.source||'')?` <a href="${esc(d.source)}" target="_blank" rel="noopener">Quelle</a>`:''}</li>`).join('')}</ul>`:'<div class="small muted">Keine passenden Angebote gefunden.</div>'}</div>`).join('')}
+  <p class="small muted">${esc(res.caveats||'')} Nur Aktionspreise, ohne Gewähr. Bitte im Geschäft prüfen.</p>`;
+}
+
 /* ---------- Claude: Foto auslesen, Rezepte im Netz suchen, Vorschläge ---------- */
 const prefill=r=>({title:r.title||'',source:r.source||'',servings:Math.max(1,+r.servings||4),tags:(r.tags||[]).join(', '),ing:(r.ingredients||[]).join('\n'),steps:(r.steps||[]).join('\n'),photos:[]});
 function aiError(e){
@@ -771,6 +866,19 @@ document.addEventListener('click',async e=>{
     case 'cookMax':COOK.max=d;paintCook();break;
     case 'cookNet':searchSheet();if($('#sq'))$('#sq').value='ein alltagstaugliches Gericht, das gut zu meinem Vorrat passt';break;
     case 'shareList':shareSheet();break;
+    case 'stores':storesSheet();break;
+    case 'storesRetry':loadStores();break;
+    case 'doDeals':doDeals();break;
+    case 'locChange':setHome(null);STORES=[];paintLoc();$('#storelist').innerHTML='';break;
+    case 'locGps':{
+      if(!navigator.geolocation){toast('Dieses Gerät kann den Standort nicht ermitteln.');break}
+      t.disabled=true;t.textContent='Ermittelt …';
+      navigator.geolocation.getCurrentPosition(async p=>{
+        const lat=p.coords.latitude,lon=p.coords.longitude;
+        setHome({lat,lon,label:'Aktueller Standort'});paintLoc();loadStores();
+        const l=await reverseLabel(lat,lon);if(l){setHome({lat,lon,label:l});paintLoc()}
+      },()=>{t.disabled=false;t.textContent='Meinen Standort verwenden';toast('Der Standort wurde nicht freigegeben. Gib stattdessen PLZ oder Ort ein.')},{timeout:12000,maximumAge:600000});
+      break}
     case 'copyList':copyText($('#stxt'),'Liste kopiert.');break;
     case 'nativeShare':navigator.share({title:'Einkaufsliste',text:$('#stxt').value}).catch(()=>{});break;
     case 'backfill':if(!S.recipes.length){toast('Lege zuerst ein Rezept an.');break}planSheet(iso(addDays(NOW,-1)),null);break;
@@ -818,7 +926,7 @@ document.addEventListener('click',async e=>{
     case 'saveKey':{const v=($('#akey')?.value||'').trim();
       if(!/^sk-ant-/.test(v)){toast('Das sieht nicht nach einem Schlüssel aus. Er beginnt mit sk-ant-.');break}
       AI.set(v);toast('Schlüssel gespeichert.');const n=AFTER;AFTER=null;closeSheet();
-      if(n==='aiPhoto')photoSheet();else if(n==='aiSearch')searchSheet();else if(n==='aiUrl')urlSheet();else if(n==='balance')balanceSheet();else settingsSheet();break}
+      if(n==='aiPhoto')photoSheet();else if(n==='aiSearch')searchSheet();else if(n==='aiUrl')urlSheet();else if(n==='deals')storesSheet();else if(n==='balance')balanceSheet();else settingsSheet();break}
     case 'delKey':AI.set('');toast('Schlüssel entfernt.');settingsSheet();break;
     case 'testKey':{t.disabled=true;t.textContent='Testet …';try{await AI.test();toast('Der Zugang funktioniert.')}catch(x){toast(aiError(x))}t.disabled=false;t.textContent='Testen';break}
     case 'editRecipe':{const r=rec(D.rid);closeSheet();recipeForm({title:r.title,source:r.source,servings:r.servings,tags:r.tags.join(', '),ing:r.ing.map(lineStr).join('\n'),steps:r.steps.join('\n'),photos:r.photos||[]},r.id);break}
@@ -848,6 +956,12 @@ document.addEventListener('input',e=>{if(e.target.id==='q'){UI.q=e.target.value;
 document.addEventListener('submit',e=>{
   const f=e.target.dataset.form; if(!f)return; e.preventDefault();
   if(f==='addPantry'){const n=$('#pn').value.trim();if(!n)return;S.pantry.push({id:uid(),name:n,loc:$('#pl').value,level:2});commit();$('#pn').focus()}
+  if(f==='addLoc'){
+    const q=$('#lq').value.trim();if(q.length<2)return;
+    const b=e.target.querySelector('button');b.disabled=true;b.textContent='Sucht …';
+    geocode(q).then(h=>{if(!h){toast('Dieser Ort wurde nicht gefunden.');b.disabled=false;b.textContent='Suchen';return}setHome(h);paintLoc();loadStores()})
+      .catch(()=>{toast('Die Ortssuche ist gerade nicht erreichbar.');b.disabled=false;b.textContent='Suchen'});
+  }
   if(f==='addMember'){const n=$('#mn').value.trim();if(!n)return;const m={id:uid(),name:n};S.members.push(m);if(!getMe()&&S.members.length===1)setMe(m.id);commit();membersSheet();$('#mn').focus()}
   if(f==='addExtra'){const g=parseLine($('#xn').value);if(!g)return;S.extras.push({id:uid(),name:g.name,amount:g.amount,unit:g.unit,cat:guess(g.name)});commit();$('#xn').focus()}
 });

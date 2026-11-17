@@ -39,6 +39,14 @@ Dafür braucht jedes Gerät einmal einen Schlüssel von console.anthropic.com (�
 Die Websuche muss in der Anthropic Console unter den Datenschutz-Einstellungen der Organisation erlaubt sein.
 Ohne Schlüssel funktioniert die App wie bisher.
 
+## Wo einkaufen? (Einkauf → „Wo einkaufen?")
+
+- **Geschäfte in der Nähe:** Standort per Gerät oder PLZ/Ort. Die Filialen von Spar, Billa, Hofer, Lidl, Penny, MPreis und Unimarkt kommen aus OpenStreetMap
+  (Overpass-API, `overpass-api.de` mit Ausweichserver, und Nominatim für die Ortssuche). Dorthin gehen Koordinaten beziehungsweise der eingegebene Ort.
+  Der Standort wird nur im `localStorage` des Geräts gespeichert, nicht in OneDrive.
+- **Wochenangebote:** Claude sucht mit der Websuche Aktionen zu den offenen Artikeln der Einkaufsliste. Nur Aktionspreise, ohne Gewähr; mit Quelle und Gültigkeit.
+  Es gibt keine öffentliche Preisdatenbank für Normalpreise.
+
 ## Wie Änderungen zusammengeführt werden
 
 Jedes Gerät merkt sich den zuletzt abgeglichenen Stand. Beim Speichern werden nur die eigenen Änderungen
